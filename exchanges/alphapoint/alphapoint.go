@@ -54,6 +54,8 @@ func (a *Alphapoint) SetDefaults() {
 	a.AssetTypes = []string{ticker.Spot}
 	a.SupportsAutoPairUpdating = false
 	a.SupportsRESTTickerBatching = false
+	a.SupportsRESTAPI = true
+	a.SupportsWebsocketAPI = true
 	a.APIWithdrawPermissions = exchange.WithdrawCryptoWith2FA | exchange.AutoWithdrawCryptoWithAPIPermission | exchange.NoFiatWithdrawals
 	a.Requester = request.New(a.Name,
 		request.NewRateLimit(time.Minute*10, alphapointAuthRate),

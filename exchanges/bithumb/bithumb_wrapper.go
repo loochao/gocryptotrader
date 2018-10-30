@@ -28,7 +28,6 @@ func (b *Bithumb) Start(wg *sync.WaitGroup) {
 // Run implements the OKEX wrapper
 func (b *Bithumb) Run() {
 	if b.Verbose {
-		log.Debugf("%s Websocket: %s. (url: %s).\n", b.GetName(), common.IsEnabled(b.Websocket.IsEnabled()), b.WebsocketURL)
 		log.Debugf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
 		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
 	}
@@ -82,8 +81,8 @@ func (b *Bithumb) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Pr
 	return ticker.GetTicker(b.Name, p, assetType)
 }
 
-// GetTickerPrice returns the ticker for a currency pair
-func (b *Bithumb) GetTickerPrice(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+// FetchTicker returns the ticker for a currency pair
+func (b *Bithumb) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateTicker(p, assetType)
@@ -91,8 +90,8 @@ func (b *Bithumb) GetTickerPrice(p pair.CurrencyPair, assetType string) (ticker.
 	return tickerNew, nil
 }
 
-// GetOrderbookEx returns orderbook base on the currency pair
-func (b *Bithumb) GetOrderbookEx(currency pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+// FetchOrderbook returns orderbook base on the currency pair
+func (b *Bithumb) FetchOrderbook(currency pair.CurrencyPair, assetType string) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(b.GetName(), currency, assetType)
 	if err != nil {
 		return b.UpdateOrderbook(currency, assetType)

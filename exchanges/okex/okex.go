@@ -113,6 +113,8 @@ func (o *OKEX) SetDefaults() {
 	o.ConfigCurrencyPairFormat.Uppercase = true
 	o.SupportsAutoPairUpdating = true
 	o.SupportsRESTTickerBatching = false
+	o.SupportsRESTAPI = true
+	o.SupportsWebsocketAPI = true
 	o.Requester = request.New(o.Name,
 		request.NewRateLimit(time.Second, okexAuthRate),
 		request.NewRateLimit(time.Second, okexUnauthRate),

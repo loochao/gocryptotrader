@@ -25,7 +25,6 @@ func (g *Gateio) Start(wg *sync.WaitGroup) {
 // Run implements the GateIO wrapper
 func (g *Gateio) Run() {
 	if g.Verbose {
-		log.Debugf("%s Websocket: %s. (url: %s).\n", g.GetName(), common.IsEnabled(g.Websocket.IsEnabled()), g.WebsocketURL)
 		log.Debugf("%s polling delay: %ds.\n", g.GetName(), g.RESTPollingDelay)
 		log.Debugf("%s %d currencies enabled: %s.\n", g.GetName(), len(g.EnabledPairs), g.EnabledPairs)
 	}
@@ -64,8 +63,8 @@ func (g *Gateio) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Pri
 	return ticker.GetTicker(g.Name, p, assetType)
 }
 
-// GetTickerPrice returns the ticker for a currency pair
-func (g *Gateio) GetTickerPrice(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+// FetchTicker returns the ticker for a currency pair
+func (g *Gateio) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(g.GetName(), p, assetType)
 	if err != nil {
 		return g.UpdateTicker(p, assetType)
@@ -73,8 +72,8 @@ func (g *Gateio) GetTickerPrice(p pair.CurrencyPair, assetType string) (ticker.P
 	return tickerNew, nil
 }
 
-// GetOrderbookEx returns orderbook base on the currency pair
-func (g *Gateio) GetOrderbookEx(currency pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+// FetchOrderbook returns orderbook base on the currency pair
+func (g *Gateio) FetchOrderbook(currency pair.CurrencyPair, assetType string) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(g.GetName(), currency, assetType)
 	if err != nil {
 		return g.UpdateOrderbook(currency, assetType)

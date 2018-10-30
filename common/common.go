@@ -34,15 +34,16 @@ import (
 
 // Vars for common.go operations
 var (
-	HTTPClient *http.Client
+	HTTPClient    *http.Client
+	HTTPUserAgent string
 
 	// ErrNotYetImplemented defines a common error across the code base that
 	// alerts of a function that has not been completed or tied into main code
-	ErrNotYetImplemented = errors.New("Not Yet Implemented")
+	ErrNotYetImplemented = errors.New("not yet implemented")
 
 	// ErrFunctionNotSupported defines a standardised error for an unsupported
 	// wrapper function by an API
-	ErrFunctionNotSupported = errors.New("Unsupported Wrapper Function")
+	ErrFunctionNotSupported = errors.New("unsupported wrapper function")
 )
 
 // Const declarations for common.go operations
@@ -369,6 +370,10 @@ func SendHTTPRequest(method, path string, headers map[string]string, body io.Rea
 
 	for k, v := range headers {
 		req.Header.Add(k, v)
+	}
+
+	if HTTPUserAgent != "" && req.Header.Get("User-Agent") == "" {
+		req.Header.Add("User-Agent", HTTPUserAgent)
 	}
 
 	resp, err := HTTPClient.Do(req)

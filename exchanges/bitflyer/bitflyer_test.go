@@ -132,7 +132,7 @@ func TestCheckFXString(t *testing.T) {
 	}
 }
 
-func TestGetTickerPrice(t *testing.T) {
+func TestFetchTicker(t *testing.T) {
 	t.Parallel()
 	var p pair.CurrencyPair
 
@@ -144,9 +144,9 @@ func TestGetTickerPrice(t *testing.T) {
 		}
 	}
 
-	_, err := b.GetTickerPrice(p, b.AssetTypes[0])
+	_, err := b.FetchTicker(p, b.AssetTypes[0])
 	if err != nil {
-		t.Error("test failed - Bitflyer - GetTickerPrice() error", err)
+		t.Error("test failed - Bitflyer - FetchTicker() error", err)
 	}
 }
 
