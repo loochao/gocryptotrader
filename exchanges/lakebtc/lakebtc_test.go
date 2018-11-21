@@ -8,6 +8,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 )
 
 var l LakeBTC
@@ -31,16 +32,16 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - LakeBTC Setup() init error")
 	}
 
-	lakebtcConfig.AuthenticatedAPISupport = true
-	lakebtcConfig.APIKey = apiKey
-	lakebtcConfig.APISecret = apiSecret
+	lakebtcConfig.API.AuthenticatedSupport = true
+	lakebtcConfig.API.Credentials.Key = apiKey
+	lakebtcConfig.API.Credentials.Secret = apiSecret
 
 	l.Setup(lakebtcConfig)
 }
 
-func TestGetTradablePairs(t *testing.T) {
+func TestFetchTradablePairs(t *testing.T) {
 	t.Parallel()
-	_, err := l.GetTradablePairs()
+	_, err := l.FetchTradablePairs(assets.AssetTypeSpot)
 	if err != nil {
 		t.Fatalf("Test failed. GetTradablePairs err: %s", err)
 	}
@@ -72,7 +73,7 @@ func TestGetTradeHistory(t *testing.T) {
 
 func TestTrade(t *testing.T) {
 	t.Parallel()
-	if l.APIKey == "" || l.APISecret == "" {
+	if !l.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := l.Trade(false, 0, 0, "USD")
@@ -83,7 +84,7 @@ func TestTrade(t *testing.T) {
 
 func TestGetOpenOrders(t *testing.T) {
 	t.Parallel()
-	if l.APIKey == "" || l.APISecret == "" {
+	if !l.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := l.GetOpenOrders()
@@ -94,7 +95,7 @@ func TestGetOpenOrders(t *testing.T) {
 
 func TestGetOrders(t *testing.T) {
 	t.Parallel()
-	if l.APIKey == "" || l.APISecret == "" {
+	if !l.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := l.GetOrders([]int64{1, 2})
@@ -105,7 +106,7 @@ func TestGetOrders(t *testing.T) {
 
 func TestCancelOrder(t *testing.T) {
 	t.Parallel()
-	if l.APIKey == "" || l.APISecret == "" {
+	if !l.ValidateAPICredentials() {
 		t.Skip()
 	}
 	err := l.CancelExistingOrder(1337)
@@ -116,7 +117,7 @@ func TestCancelOrder(t *testing.T) {
 
 func TestGetTrades(t *testing.T) {
 	t.Parallel()
-	if l.APIKey == "" || l.APISecret == "" {
+	if !l.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := l.GetTrades(1337)
@@ -127,7 +128,7 @@ func TestGetTrades(t *testing.T) {
 
 func TestGetExternalAccounts(t *testing.T) {
 	t.Parallel()
-	if l.APIKey == "" || l.APISecret == "" {
+	if !l.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := l.GetExternalAccounts()
@@ -241,11 +242,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func areTestAPIKeysSet() bool {
-	if l.APIKey != "" && l.APIKey != "Key" &&
-		l.APISecret != "" && l.APISecret != "Secret" {
-		return true
-	}
-	return false
+	return l.ValidateAPICredentials()
 }
 
 func TestSubmitOrder(t *testing.T) {
@@ -261,6 +258,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.BTC,
 		SecondCurrency: symbol.EUR,
 	}
+
 	response, err := l.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 10, "hi")
 	if areTestAPIKeysSet() && (err != nil || !response.IsOrderPlaced) {
 		t.Errorf("Order failed to be placed: %v", err)

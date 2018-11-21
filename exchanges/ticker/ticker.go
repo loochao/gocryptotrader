@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
+
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 )
@@ -15,8 +17,6 @@ const (
 	ErrTickerForExchangeNotFound = "Ticker for exchange does not exist."
 	ErrPrimaryCurrencyNotFound   = "Error primary currency for ticker not found."
 	ErrSecondaryCurrencyNotFound = "Error secondary currency for ticker not found."
-
-	Spot = "SPOT"
 )
 
 // Vars for the ticker package
@@ -41,12 +41,12 @@ type Price struct {
 
 // Ticker struct holds the ticker information for a currency pair and type
 type Ticker struct {
-	Price        map[pair.CurrencyItem]map[pair.CurrencyItem]map[string]Price
+	Price        map[pair.CurrencyItem]map[pair.CurrencyItem]map[assets.AssetType]Price
 	ExchangeName string
 }
 
 // PriceToString returns the string version of a stored price field
-func (t *Ticker) PriceToString(p pair.CurrencyPair, priceType, tickerType string) string {
+func (t *Ticker) PriceToString(p pair.CurrencyPair, priceType string, tickerType assets.AssetType) string {
 	priceType = common.StringToLower(priceType)
 
 	switch priceType {
@@ -70,7 +70,7 @@ func (t *Ticker) PriceToString(p pair.CurrencyPair, priceType, tickerType string
 }
 
 // GetTicker checks and returns a requested ticker if it exists
-func GetTicker(exchange string, p pair.CurrencyPair, tickerType string) (Price, error) {
+func GetTicker(exchange string, p pair.CurrencyPair, tickerType assets.AssetType) (Price, error) {
 	ticker, err := GetTickerByExchange(exchange)
 	if err != nil {
 		return Price{}, err
@@ -132,14 +132,14 @@ func SecondCurrencyExists(exchange string, p pair.CurrencyPair) bool {
 }
 
 // CreateNewTicker creates a new Ticker
-func CreateNewTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, tickerType string) Ticker {
+func CreateNewTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, tickerType assets.AssetType) Ticker {
 	m.Lock()
 	defer m.Unlock()
 	ticker := Ticker{}
 	ticker.ExchangeName = exchangeName
-	ticker.Price = make(map[pair.CurrencyItem]map[pair.CurrencyItem]map[string]Price)
-	a := make(map[pair.CurrencyItem]map[string]Price)
-	b := make(map[string]Price)
+	ticker.Price = make(map[pair.CurrencyItem]map[pair.CurrencyItem]map[assets.AssetType]Price)
+	a := make(map[pair.CurrencyItem]map[assets.AssetType]Price)
+	b := make(map[assets.AssetType]Price)
 	b[tickerType] = tickerNew
 	a[p.SecondCurrency] = b
 	ticker.Price[p.FirstCurrency] = a
@@ -149,7 +149,7 @@ func CreateNewTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, 
 
 // ProcessTicker processes incoming tickers, creating or updating the Tickers
 // list
-func ProcessTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, tickerType string) {
+func ProcessTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, tickerType assets.AssetType) {
 	if tickerNew.Pair.Pair() == "" {
 		// set Pair if not set
 		tickerNew.Pair = p
@@ -166,7 +166,7 @@ func ProcessTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, ti
 
 	if FirstCurrencyExists(exchangeName, p.FirstCurrency) {
 		m.Lock()
-		a := make(map[string]Price)
+		a := make(map[assets.AssetType]Price)
 		a[tickerType] = tickerNew
 		ticker.Price[p.FirstCurrency][p.SecondCurrency] = a
 		m.Unlock()
@@ -174,8 +174,8 @@ func ProcessTicker(exchangeName string, p pair.CurrencyPair, tickerNew Price, ti
 	}
 
 	m.Lock()
-	a := make(map[pair.CurrencyItem]map[string]Price)
-	b := make(map[string]Price)
+	a := make(map[pair.CurrencyItem]map[assets.AssetType]Price)
+	b := make(map[assets.AssetType]Price)
 	b[tickerType] = tickerNew
 	a[p.SecondCurrency] = b
 	ticker.Price[p.FirstCurrency] = a

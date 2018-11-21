@@ -15,6 +15,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency"
 	"github.com/thrasher-/gocryptotrader/currency/forexprovider"
+	"github.com/thrasher-/gocryptotrader/engine/events"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
 	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/portfolio"
@@ -24,18 +25,40 @@ import (
 // Engine contains configuration, portfolio, exchange & ticker data and is the
 // overarching type across this code base.
 type Engine struct {
-	Config       *config.Config
-	Portfolio    *portfolio.Base
-	Exchanges    []exchange.IBotExchange
-	CommsRelayer *communications.Communications
-	Shutdown     chan bool
-	Settings     Settings
+	Config                         *config.Config
+	Portfolio                      *portfolio.Base
+	Exchanges                      []exchange.IBotExchange
+	CommsRelayer                   *communications.Communications
+	Shutdown                       chan bool
+	Settings                       Settings
+	CryptocurrencyDepositAddresses map[string]map[string]string
 }
 
 // Vars for engine
 var (
 	Bot *Engine
 )
+
+func init() {
+	if Bot == nil {
+		return
+	}
+}
+
+// New starts a new engine
+func New() (*Engine, error) {
+	var b Engine
+	b.Config = &config.Cfg
+
+	err := b.Config.LoadConfig("")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config. Err: %s", err)
+	}
+
+	b.CryptocurrencyDepositAddresses = make(map[string]map[string]string)
+
+	return &b, nil
+}
 
 // NewFromSettings starts a new engine based on supplied settings
 func NewFromSettings(settings *Settings) (*Engine, error) {
@@ -59,6 +82,7 @@ func NewFromSettings(settings *Settings) (*Engine, error) {
 	b.Settings.ConfigFile = settings.ConfigFile
 	b.Settings.DataDir = settings.DataDir
 	b.Settings.LogFile = utils.GetLogFile(settings.DataDir)
+	b.CryptocurrencyDepositAddresses = make(map[string]map[string]string)
 
 	err = utils.AdjustGoMaxProcs(settings.GoMaxProcs)
 	if err != nil {
@@ -81,6 +105,7 @@ func NewFromSettings(settings *Settings) (*Engine, error) {
 
 // ValidateSettings validates and sets all bot settings
 func ValidateSettings(b *Engine, s *Settings) {
+	b.Settings.Verbose = s.Verbose
 	b.Settings.EnableDryRun = s.EnableDryRun
 	b.Settings.EnableAllExchanges = s.EnableAllExchanges
 	b.Settings.EnableAllPairs = s.EnableAllPairs
@@ -100,7 +125,17 @@ func ValidateSettings(b *Engine, s *Settings) {
 	}
 
 	b.Settings.EnableCommsRelayer = s.EnableCommsRelayer
-	b.Settings.Verbose = s.Verbose
+	b.Settings.EnableEventManager = s.EnableEventManager
+
+	if b.Settings.EnableEventManager {
+		events.Verbose = b.Settings.Verbose
+		if b.Settings.EventManagerDelay != time.Duration(0) && s.EventManagerDelay > 0 {
+			b.Settings.EventManagerDelay = s.EventManagerDelay
+		} else {
+			b.Settings.EventManagerDelay = events.SleepDelay
+		}
+	}
+
 	b.Settings.EnableTickerRoutine = s.EnableTickerRoutine
 	b.Settings.EnableOrderbookRoutine = s.EnableOrderbookRoutine
 	b.Settings.EnableWebsocketRoutine = s.EnableWebsocketRoutine
@@ -109,6 +144,8 @@ func ValidateSettings(b *Engine, s *Settings) {
 	b.Settings.EnableExchangeRESTSupport = s.EnableExchangeRESTSupport
 	b.Settings.EnableExchangeVerbose = s.EnableExchangeVerbose
 	b.Settings.EnableHTTPRateLimiter = s.EnableHTTPRateLimiter
+	b.Settings.DisableExchangeAutoPairUpdates = s.DisableExchangeAutoPairUpdates
+	b.Settings.ExchangePurgeCredentials = s.ExchangePurgeCredentials
 
 	if !b.Settings.EnableHTTPRateLimiter {
 		request.DisableRateLimiter = true
@@ -118,6 +155,11 @@ func ValidateSettings(b *Engine, s *Settings) {
 	b.Settings.MaxHTTPRequestJobsLimit = s.MaxHTTPRequestJobsLimit
 	if b.Settings.MaxHTTPRequestJobsLimit != request.DefaultMaxRequestJobs && s.MaxHTTPRequestJobsLimit > 0 {
 		request.MaxRequestJobs = b.Settings.MaxHTTPRequestJobsLimit
+	}
+
+	b.Settings.RequestTimeoutRetryAttempts = s.RequestTimeoutRetryAttempts
+	if b.Settings.RequestTimeoutRetryAttempts != request.DefaultTimeoutRetryAttempts && s.RequestTimeoutRetryAttempts > 0 {
+		request.TimeoutRetryAttempts = b.Settings.RequestTimeoutRetryAttempts
 	}
 
 	b.Settings.ExchangeHTTPTimeout = s.ExchangeHTTPTimeout
@@ -158,15 +200,19 @@ func PrintSettings(s Settings) {
 	log.Printf("\t Enable websocket server: %v", s.EnableWebsocketServer)
 	log.Printf("\t Enable REST server: %v", s.EnableRESTServer)
 	log.Printf("\t Enable comms relayer: %v", s.EnableCommsRelayer)
+	log.Printf("\t Enable event manager: %v", s.EnableEventManager)
+	log.Printf("\t Event manager sleep delay: %v", s.EventManagerDelay)
 	log.Printf("\t Enable ticker routine: %v", s.EnableTickerRoutine)
 	log.Printf("\t Enable orderbook routine: %v", s.EnableOrderbookRoutine)
 	log.Printf("\t Enable websocket routine: %v\n", s.EnableWebsocketRoutine)
 	log.Printf("- EXCHANGE SETTINGS:")
 	log.Printf("\t Enable exchange auto pair updates: %v", s.EnableExchangeAutoPairUpdates)
+	log.Printf("\t Disable all exchange auto pair updates: %v", s.DisableExchangeAutoPairUpdates)
 	log.Printf("\t Enable exchange websocket support: %v", s.EnableExchangeWebsocketSupport)
 	log.Printf("\t Enable exchange verbose mode: %v", s.EnableExchangeVerbose)
 	log.Printf("\t Enable exchange HTTP rate limiter: %v", s.EnableHTTPRateLimiter)
 	log.Printf("\t Exchange max HTTP request jobs: %v", s.MaxHTTPRequestJobsLimit)
+	log.Printf("\t Exchange HTTP request timeout retry amount: %v", s.RequestTimeoutRetryAttempts)
 	log.Printf("\t Exchange HTTP timeout: %v", s.ExchangeHTTPTimeout)
 	log.Printf("\t Exchange HTTP user agent: %v", s.ExchangeHTTPUserAgent)
 	log.Printf("\t Exchange HTTP proxy: %v\n", s.ExchangeHTTPProxy)
@@ -190,9 +236,17 @@ func (e *Engine) Start() {
 		enabledExchanges = len(e.Config.Exchanges)
 	}
 
-	log.Printf("Available Exchanges: %d. Enabled Exchanges: %d.\n",
+	log.Println()
+	log.Println("EXCHANGE COVERAGE")
+	log.Printf("\t Available Exchanges: %d. Enabled Exchanges: %d.\n",
 		len(e.Config.Exchanges), enabledExchanges)
 
+	if e.Settings.ExchangePurgeCredentials {
+		log.Println("Purging exchange API credentials.")
+		e.Config.PurgeExchangeAPICredentials()
+	}
+
+	log.Println("Setting up exchanges..")
 	SetupExchanges()
 	if len(e.Exchanges) == 0 {
 		log.Fatalf("No exchanges were able to be loaded. Exiting")
@@ -223,6 +277,8 @@ func (e *Engine) Start() {
 	e.Portfolio.Seed(e.Config.Portfolio)
 	SeedExchangeAccountInfo(GetAllEnabledExchangeAccountInfo().Data)
 
+	e.CryptocurrencyDepositAddresses = GetExchangeCryptocurrencyDepositAddresses()
+
 	if e.Settings.EnableRESTServer {
 		go StartRESTServer()
 	}
@@ -246,6 +302,10 @@ func (e *Engine) Start() {
 
 	if e.Settings.EnableWebsocketRoutine {
 		go WebsocketRoutine()
+	}
+
+	if e.Settings.EnableEventManager {
+		go events.EventManger()
 	}
 
 	<-e.Shutdown

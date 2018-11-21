@@ -3,7 +3,6 @@ package bitstamp
 import (
 	"net/url"
 	"testing"
-	"time"
 
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
@@ -28,16 +27,13 @@ func TestSetDefaults(t *testing.T) {
 	if b.Name != "Bitstamp" {
 		t.Error("Test Failed - SetDefaults() error")
 	}
-	if b.Enabled != false {
+	if b.Enabled != true {
 		t.Error("Test Failed - SetDefaults() error")
 	}
-	if b.Verbose != false {
+	if b.Verbose != true {
 		t.Error("Test Failed - SetDefaults() error")
 	}
 	if b.Websocket.IsEnabled() != false {
-		t.Error("Test Failed - SetDefaults() error")
-	}
-	if b.RESTPollingDelay != 10 {
 		t.Error("Test Failed - SetDefaults() error")
 	}
 }
@@ -49,16 +45,15 @@ func TestSetup(t *testing.T) {
 	if err != nil {
 		t.Error("Test Failed - Bitstamp Setup() init error")
 	}
-	bConfig.APIKey = apiKey
-	bConfig.APISecret = apiSecret
-	bConfig.ClientID = customerID
+	bConfig.API.Credentials.Key = apiKey
+	bConfig.API.Credentials.Secret = apiSecret
+	bConfig.API.Credentials.ClientID = customerID
 
 	b.Setup(bConfig)
-	b.ClientID = customerID
 
-	if !b.IsEnabled() || b.RESTPollingDelay != time.Duration(10) ||
+	if !b.IsEnabled() || b.API.AuthenticatedSupport ||
 		b.Verbose || b.Websocket.IsEnabled() || len(b.BaseCurrencies) < 1 ||
-		len(b.AvailablePairs) < 1 || len(b.EnabledPairs) < 1 {
+		len(b.CurrencyPairs.Spot.Available) < 1 || len(b.CurrencyPairs.Spot.Enabled) < 1 {
 		t.Error("Test Failed - Bitstamp Setup values not set correctly")
 	}
 }
@@ -255,8 +250,7 @@ func TestGetOpenOrders(t *testing.T) {
 
 func TestGetOrderStatus(t *testing.T) {
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !b.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := b.GetOrderStatus(1337)
@@ -285,8 +279,7 @@ func TestCancelAllExistingOrders(t *testing.T) {
 
 func TestPlaceOrder(t *testing.T) {
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !b.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := b.PlaceOrder("btcusd", 0.01, 1, true, true)
@@ -310,8 +303,7 @@ func TestGetWithdrawalRequests(t *testing.T) {
 
 func TestCryptoWithdrawal(t *testing.T) {
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !b.ValidateAPICredentials() {
 		t.Skip()
 	}
 
@@ -340,10 +332,8 @@ func TestGetUnconfirmedBitcoinDeposits(t *testing.T) {
 }
 
 func TestTransferAccountBalance(t *testing.T) {
-
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !b.ValidateAPICredentials() {
 		t.Skip()
 	}
 	_, err := b.TransferAccountBalance(1, "", "", true)
@@ -371,11 +361,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func areTestAPIKeysSet() bool {
-	if b.APIKey != "" && b.APIKey != "Key" &&
-		b.APISecret != "" && b.APISecret != "Secret" {
-		return true
-	}
-	return false
+	return b.ValidateAPICredentials()
 }
 
 func TestSubmitOrder(t *testing.T) {

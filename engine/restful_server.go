@@ -6,9 +6,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/thrasher-/gocryptotrader/config"
-	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
@@ -67,10 +65,10 @@ func RESTGetOrderbook(w http.ResponseWriter, r *http.Request) {
 	assetType := vars["assetType"]
 
 	if assetType == "" {
-		assetType = orderbook.Spot
+		assetType = assets.AssetTypeSpot.String()
 	}
 
-	response, err := GetSpecificOrderbook(currency, exchange, assetType)
+	response, err := GetSpecificOrderbook(currency, exchange, assets.AssetType(assetType))
 	if err != nil {
 		log.Errorf("Failed to fetch orderbook for %s currency: %s\n", exchange,
 			currency)
@@ -87,45 +85,29 @@ func RESTGetOrderbook(w http.ResponseWriter, r *http.Request) {
 func GetAllActiveOrderbooks() []EnabledExchangeOrderbooks {
 	var orderbookData []EnabledExchangeOrderbooks
 
-	for _, individualBot := range Bot.Exchanges {
-		if individualBot != nil && individualBot.IsEnabled() {
-			var individualExchange EnabledExchangeOrderbooks
-			exchangeName := individualBot.GetName()
-			individualExchange.ExchangeName = exchangeName
-			currencies := individualBot.GetEnabledCurrencies()
-			assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
-			if err != nil {
-				log.Errorf("failed to get %s exchange asset types. Error: %s",
-					exchangeName, err)
-				continue
-			}
-			for _, x := range currencies {
-				currency := x
+	for _, exch := range Bot.Exchanges {
+		if !exch.IsEnabled() {
+			continue
+		}
 
-				var ob orderbook.Base
-				if len(assetTypes) > 1 {
-					for y := range assetTypes {
-						ob, err = individualBot.FetchOrderbook(currency,
-							assetTypes[y])
-					}
-				} else {
-					ob, err = individualBot.FetchOrderbook(currency,
-						assetTypes[0])
-				}
+		assets := exch.GetAssetTypes()
+		exchName := exch.GetName()
+		var exchangeOB EnabledExchangeOrderbooks
+		exchangeOB.ExchangeName = exchName
 
+		for y := range assets {
+			currencies := exch.GetEnabledPairs(assets[y])
+			for z := range currencies {
+				ob, err := exch.FetchOrderbook(currencies[z], assets[y])
 				if err != nil {
-					log.Errorf("failed to get %s %s orderbook. Error: %s",
-						currency.Pair().String(),
-						exchangeName,
+					log.Printf("Exchange %s failed to retrieve %s orderbook. Err: %s", exchName,
+						currencies[z].Pair().String(),
 						err)
 					continue
 				}
-
-				individualExchange.ExchangeValues = append(
-					individualExchange.ExchangeValues, ob,
-				)
+				exchangeOB.ExchangeValues = append(exchangeOB.ExchangeValues, ob)
 			}
-			orderbookData = append(orderbookData, individualExchange)
+			orderbookData = append(orderbookData, exchangeOB)
 		}
 	}
 	return orderbookData
@@ -156,15 +138,15 @@ func RESTGetPortfolio(w http.ResponseWriter, r *http.Request) {
 func RESTGetTicker(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	currency := vars["currency"]
-	exchange := vars["exchangeName"]
+	exchName := vars["exchangeName"]
 	assetType := vars["assetType"]
 
 	if assetType == "" {
-		assetType = ticker.Spot
+		assetType = assets.AssetTypeSpot.String()
 	}
-	response, err := GetSpecificTicker(currency, exchange, assetType)
+	response, err := GetSpecificTicker(currency, exchName, assets.AssetType(assetType))
 	if err != nil {
-		log.Errorf("Failed to fetch ticker for %s currency: %s\n", exchange,
+		log.Printf("Failed to fetch ticker for %s currency: %s\n", exchName,
 			currency)
 		return
 	}
@@ -178,44 +160,29 @@ func RESTGetTicker(w http.ResponseWriter, r *http.Request) {
 func GetAllActiveTickers() []EnabledExchangeCurrencies {
 	var tickerData []EnabledExchangeCurrencies
 
-	for _, individualBot := range Bot.Exchanges {
-		if individualBot != nil && individualBot.IsEnabled() {
-			var individualExchange EnabledExchangeCurrencies
-			exchangeName := individualBot.GetName()
-			individualExchange.ExchangeName = exchangeName
-			currencies := individualBot.GetEnabledCurrencies()
-			for _, x := range currencies {
-				currency := x
-				assetTypes, err := exchange.GetExchangeAssetTypes(exchangeName)
-				if err != nil {
-					log.Errorf("failed to get %s exchange asset types. Error: %s",
-						exchangeName, err)
-					continue
-				}
-				var tickerPrice ticker.Price
-				if len(assetTypes) > 1 {
-					for y := range assetTypes {
-						tickerPrice, err = individualBot.FetchTicker(currency,
-							assetTypes[y])
-					}
-				} else {
-					tickerPrice, err = individualBot.FetchTicker(currency,
-						assetTypes[0])
-				}
+	for _, exch := range Bot.Exchanges {
+		if !exch.IsEnabled() {
+			continue
+		}
 
+		assets := exch.GetAssetTypes()
+		exchName := exch.GetName()
+		var exchangeTicker EnabledExchangeCurrencies
+		exchangeTicker.ExchangeName = exchName
+
+		for y := range assets {
+			currencies := exch.GetEnabledPairs(assets[y])
+			for z := range currencies {
+				tp, err := exch.FetchTicker(currencies[z], assets[y])
 				if err != nil {
-					log.Errorf("failed to get %s %s ticker. Error: %s",
-						currency.Pair().String(),
-						exchangeName,
+					log.Printf("Exchange %s failed to retrieve %s ticker. Err: %s", exchName,
+						currencies[z].Pair().String(),
 						err)
 					continue
 				}
-
-				individualExchange.ExchangeValues = append(
-					individualExchange.ExchangeValues, tickerPrice,
-				)
+				exchangeTicker.ExchangeValues = append(exchangeTicker.ExchangeValues, tp)
 			}
-			tickerData = append(tickerData, individualExchange)
+			tickerData = append(tickerData, exchangeTicker)
 		}
 	}
 	return tickerData
@@ -238,7 +205,9 @@ func GetAllEnabledExchangeAccountInfo() AllEnabledExchangeAccounts {
 	for _, individualBot := range Bot.Exchanges {
 		if individualBot != nil && individualBot.IsEnabled() {
 			if !individualBot.GetAuthenticatedAPISupport() {
-				log.Warnf("GetAllEnabledExchangeAccountInfo: Skippping %s due to disabled authenticated API support.", individualBot.GetName())
+				if Bot.Settings.Verbose {
+					log.Debugf("GetAllEnabledExchangeAccountInfo: Skippping %s due to disabled authenticated API support.", individualBot.GetName())
+				}
 				continue
 			}
 			individualExchange, err := individualBot.GetAccountInfo()

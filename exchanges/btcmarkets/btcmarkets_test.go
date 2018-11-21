@@ -33,9 +33,9 @@ func TestSetup(t *testing.T) {
 	}
 
 	if apiKey != "" && apiSecret != "" {
-		bConfig.APIKey = apiKey
-		bConfig.APISecret = apiSecret
-		bConfig.AuthenticatedAPISupport = true
+		bConfig.API.Credentials.Key = apiKey
+		bConfig.API.Credentials.Secret = apiSecret
+		bConfig.API.AuthenticatedSupport = true
 	}
 
 	b.Setup(bConfig)
@@ -280,11 +280,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func areTestAPIKeysSet() bool {
-	if b.APIKey != "" && b.APIKey != "Key" &&
-		b.APISecret != "" && b.APISecret != "Secret" {
-		return true
-	}
-	return false
+	return b.ValidateAPICredentials()
 }
 
 func TestSubmitOrder(t *testing.T) {
@@ -300,6 +296,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.BTC,
 		SecondCurrency: symbol.LTC,
 	}
+
 	response, err := b.SubmitOrder(p, exchange.Buy, exchange.Limit, 1, 1, "clientId")
 	if areTestAPIKeysSet() && (err != nil || !response.IsOrderPlaced) {
 		t.Errorf("Order failed to be placed: %v", err)

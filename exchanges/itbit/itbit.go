@@ -10,11 +10,8 @@ import (
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
-	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/request"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
@@ -41,75 +38,11 @@ type ItBit struct {
 	exchange.Base
 }
 
-// SetDefaults sets the defaults for the exchange
-func (i *ItBit) SetDefaults() {
-	i.Name = "ITBIT"
-	i.Enabled = false
-	i.MakerFee = -0.10
-	i.TakerFee = 0.50
-	i.Verbose = false
-	i.RESTPollingDelay = 10
-	i.APIWithdrawPermissions = exchange.WithdrawCryptoViaWebsiteOnly | exchange.WithdrawFiatViaWebsiteOnly
-	i.RequestCurrencyPairFormat.Delimiter = ""
-	i.RequestCurrencyPairFormat.Uppercase = true
-	i.ConfigCurrencyPairFormat.Delimiter = ""
-	i.ConfigCurrencyPairFormat.Uppercase = true
-	i.AssetTypes = []string{ticker.Spot}
-	i.SupportsAutoPairUpdating = false
-	i.SupportsRESTTickerBatching = false
-	i.SupportsRESTAPI = true
-	i.SupportsWebsocketAPI = false
-	i.Requester = request.New(i.Name,
-		request.NewRateLimit(time.Second, itbitAuthRate),
-		request.NewRateLimit(time.Second, itbitUnauthRate),
-		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
-	i.APIUrlDefault = itbitAPIURL
-	i.APIUrl = i.APIUrlDefault
-}
-
-// Setup sets the exchange parameters from exchange config
-func (i *ItBit) Setup(exch config.ExchangeConfig) {
-	if !exch.Enabled {
-		i.SetEnabled(false)
-	} else {
-		i.Enabled = true
-		i.AuthenticatedAPISupport = exch.AuthenticatedAPISupport
-		i.SetAPIKeys(exch.APIKey, exch.APISecret, exch.ClientID, false)
-		i.SetHTTPClientTimeout(exch.HTTPTimeout)
-		i.SetHTTPClientUserAgent(exch.HTTPUserAgent)
-		i.RESTPollingDelay = exch.RESTPollingDelay
-		i.Verbose = exch.Verbose
-		i.BaseCurrencies = common.SplitStrings(exch.BaseCurrencies, ",")
-		i.AvailablePairs = common.SplitStrings(exch.AvailablePairs, ",")
-		i.EnabledPairs = common.SplitStrings(exch.EnabledPairs, ",")
-		err := i.SetCurrencyPairFormat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = i.SetAssetTypes()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = i.SetAutoPairDefaults()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = i.SetAPIURL(exch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = i.SetClientProxyAddress(exch.ProxyAddress)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
 // GetTicker returns ticker info for a specified market.
 // currencyPair - example "XBTUSD" "XBTSGD" "XBTEUR"
 func (i *ItBit) GetTicker(currencyPair string) (Ticker, error) {
 	var response Ticker
-	path := fmt.Sprintf("%s/%s/%s/%s", i.APIUrl, itbitMarkets, currencyPair, itbitTicker)
+	path := fmt.Sprintf("%s/%s/%s/%s", i.API.Endpoints.URL, itbitMarkets, currencyPair, itbitTicker)
 
 	return response, i.SendHTTPRequest(path, &response)
 }
@@ -118,7 +51,7 @@ func (i *ItBit) GetTicker(currencyPair string) (Ticker, error) {
 // currencyPair - example "XBTUSD" "XBTSGD" "XBTEUR"
 func (i *ItBit) GetOrderbook(currencyPair string) (OrderbookResponse, error) {
 	response := OrderbookResponse{}
-	path := fmt.Sprintf("%s/%s/%s/%s", i.APIUrl, itbitMarkets, currencyPair, itbitOrderbook)
+	path := fmt.Sprintf("%s/%s/%s/%s", i.API.Endpoints.URL, itbitMarkets, currencyPair, itbitOrderbook)
 
 	return response, i.SendHTTPRequest(path, &response)
 }
@@ -130,7 +63,7 @@ func (i *ItBit) GetOrderbook(currencyPair string) (OrderbookResponse, error) {
 func (i *ItBit) GetTradeHistory(currencyPair, timestamp string) (Trades, error) {
 	response := Trades{}
 	req := "trades?since=" + timestamp
-	path := fmt.Sprintf("%s/%s/%s/%s", i.APIUrl, itbitMarkets, currencyPair, req)
+	path := fmt.Sprintf("%s/%s/%s/%s", i.API.Endpoints.URL, itbitMarkets, currencyPair, req)
 
 	return response, i.SendHTTPRequest(path, &response)
 }
@@ -142,7 +75,7 @@ func (i *ItBit) GetTradeHistory(currencyPair, timestamp string) (Trades, error) 
 //					perPage - [optional] items per page example 50, default 50 max 50
 func (i *ItBit) GetWallets(params url.Values) ([]Wallet, error) {
 	resp := []Wallet{}
-	params.Set("userId", i.ClientID)
+	params.Set("userId", i.API.Credentials.ClientID)
 	path := fmt.Sprintf("/%s?%s", itbitWallets, params.Encode())
 
 	return resp, i.SendAuthenticatedHTTPRequest("GET", path, nil, &resp)
@@ -152,7 +85,7 @@ func (i *ItBit) GetWallets(params url.Values) ([]Wallet, error) {
 func (i *ItBit) CreateWallet(walletName string) (Wallet, error) {
 	resp := Wallet{}
 	params := make(map[string]interface{})
-	params["userId"] = i.ClientID
+	params["userId"] = i.API.Credentials.ClientID
 	params["name"] = walletName
 
 	err := i.SendAuthenticatedHTTPRequest("POST", "/"+itbitWallets, params, &resp)
@@ -352,16 +285,12 @@ func (i *ItBit) SendHTTPRequest(path string, result interface{}) error {
 
 // SendAuthenticatedHTTPRequest sends an authenticated request to itBit
 func (i *ItBit) SendAuthenticatedHTTPRequest(method string, path string, params map[string]interface{}, result interface{}) error {
-	if !i.AuthenticatedAPISupport {
+	if !i.AllowAuthenticatedRequest() {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet, i.Name)
 	}
 
-	if i.ClientID == "" {
-		return errors.New("client ID not set")
-	}
-
 	request := make(map[string]interface{})
-	url := i.APIUrl + path
+	url := i.API.Endpoints.URL + path
 
 	if params != nil {
 		for key, value := range params {
@@ -393,11 +322,11 @@ func (i *ItBit) SendAuthenticatedHTTPRequest(method string, path string, params 
 	}
 
 	hash := common.GetSHA256([]byte(nonce + string(message)))
-	hmac := common.GetHMAC(common.HashSHA512, []byte(url+string(hash)), []byte(i.APISecret))
+	hmac := common.GetHMAC(common.HashSHA512, []byte(url+string(hash)), []byte(i.API.Credentials.Secret))
 	signature := common.Base64Encode(hmac)
 
 	headers := make(map[string]string)
-	headers["Authorization"] = i.ClientID + ":" + signature
+	headers["Authorization"] = i.API.Credentials.ClientID + ":" + signature
 	headers["X-Auth-Timestamp"] = timestamp
 	headers["X-Auth-Nonce"] = nonce
 	headers["Content-Type"] = "application/json"

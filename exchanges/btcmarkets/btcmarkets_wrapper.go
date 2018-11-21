@@ -5,15 +5,104 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (b *BTCMarkets) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	b.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = b.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(b.BaseCurrencies, ",")
+
+	err := b.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if b.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = b.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets basic defaults
+func (b *BTCMarkets) SetDefaults() {
+	b.Name = "BTC Markets"
+	b.Enabled = true
+	b.Verbose = true
+	b.API.CredentialsValidator.RequiresKey = true
+	b.API.CredentialsValidator.RequiresSecret = true
+	b.API.CredentialsValidator.RequiresBase64DecodeSecret = true
+	b.API.Endpoints.URLDefault = btcMarketsAPIURL
+	b.API.Endpoints.URL = b.API.Endpoints.URLDefault
+	b.APIWithdrawPermissions = exchange.AutoWithdrawCrypto | exchange.AutoWithdrawFiat
+
+	b.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "-",
+			Uppercase: true,
+		},
+	}
+
+	b.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: false,
+
+			Trading: exchange.TradingSupported{
+				Spot: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: true,
+				TickerBatching:  false,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+
+	b.Requester = request.New(b.Name,
+		request.NewRateLimit(time.Second*10, btcmarketsAuthLimit),
+		request.NewRateLimit(time.Second*10, btcmarketsUnauthLimit),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+}
+
+// Setup takes in an exchange configuration and sets all parameters
+func (b *BTCMarkets) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		b.SetEnabled(false)
+		return nil
+	}
+
+	return b.SetupDefaults(exch)
+}
 
 // Start starts the BTC Markets go routine
 func (b *BTCMarkets) Start(wg *sync.WaitGroup) {
@@ -27,42 +116,59 @@ func (b *BTCMarkets) Start(wg *sync.WaitGroup) {
 // Run implements the BTC Markets wrapper
 func (b *BTCMarkets) Run() {
 	if b.Verbose {
-		log.Debugf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
+		log.Printf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.CurrencyPairs.Spot.Enabled), b.CurrencyPairs.Spot.Enabled)
 	}
 
-	markets, err := b.GetMarkets()
-	if err != nil {
-		log.Errorf("%s failed to get active market. Err: %s", b.Name, err)
-	} else {
-		forceUpgrade := false
-		if !common.StringDataContains(b.EnabledPairs, "-") || !common.StringDataContains(b.AvailablePairs, "-") {
-			forceUpgrade = true
-		}
+	forceUpdate := false
+	if !common.StringDataContains(b.CurrencyPairs.Spot.Enabled, "-") || !common.StringDataContains(b.CurrencyPairs.Spot.Available, "-") {
+		enabledPairs := []string{"BTC-AUD"}
+		log.Println("WARNING: Available pairs for BTC Makrets reset due to config upgrade, please enable the pairs you would like again.")
+		forceUpdate = true
 
-		var currencies []string
-		for x := range markets {
-			currencies = append(currencies, markets[x].Instrument+"-"+markets[x].Currency)
-		}
-
-		if forceUpgrade {
-			enabledPairs := []string{"BTC-AUD"}
-			log.Warn("Available pairs for BTC Makrets reset due to config upgrade, please enable the pairs you would like again.")
-
-			err = b.UpdateCurrencies(enabledPairs, true, true)
-			if err != nil {
-				log.Errorf("%s failed to update currencies. Err: %s", b.Name, err)
-			}
-		}
-		err = b.UpdateCurrencies(currencies, false, forceUpgrade)
+		err := b.UpdatePairs(enabledPairs, assets.AssetTypeSpot, true, true)
 		if err != nil {
-			log.Errorf("%s failed to update currencies. Err: %s", b.Name, err)
+			log.Printf("%s failed to update currencies. Err: %s", b.Name, err)
 		}
+	}
+
+	if !b.GetEnabledFeatures().AutoPairUpdates && !forceUpdate {
+		return
+	}
+
+	err := b.UpdateTradablePairs(forceUpdate)
+	if err != nil {
+		log.Printf("%s failed to update tradable pairs. Err: %s", b.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (b *BTCMarkets) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	markets, err := b.GetMarkets()
+	if err != nil {
+		return nil, err
+	}
+
+	var pairs []string
+	for x := range markets {
+		pairs = append(pairs, markets[x].Instrument+"-"+markets[x].Currency)
+	}
+
+	return pairs, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (b *BTCMarkets) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := b.FetchTradablePairs(assets.AssetTypeSpot)
+	if err != nil {
+		return err
+	}
+
+	return b.UpdatePairs(pairs, assets.AssetTypeSpot, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (b *BTCMarkets) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *BTCMarkets) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := b.GetTicker(p.FirstCurrency.String(),
 		p.SecondCurrency.String())
@@ -78,7 +184,7 @@ func (b *BTCMarkets) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (b *BTCMarkets) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *BTCMarkets) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateTicker(p, assetType)
@@ -87,7 +193,7 @@ func (b *BTCMarkets) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (b *BTCMarkets) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *BTCMarkets) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateOrderbook(p, assetType)
@@ -96,7 +202,7 @@ func (b *BTCMarkets) FetchOrderbook(p pair.CurrencyPair, assetType string) (orde
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (b *BTCMarkets) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *BTCMarkets) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := b.GetOrderbook(p.FirstCurrency.String(),
 		p.SecondCurrency.String())
@@ -148,7 +254,7 @@ func (b *BTCMarkets) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (b *BTCMarkets) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (b *BTCMarkets) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

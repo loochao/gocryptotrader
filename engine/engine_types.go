@@ -20,15 +20,20 @@ type Settings struct {
 	EnableOrderbookRoutine bool
 	EnableWebsocketRoutine bool
 	EnableCommsRelayer     bool
+	EnableEventManager     bool
+	EventManagerDelay      time.Duration
 	Verbose                bool
 
 	// Exchange tuning settings
 	EnableHTTPRateLimiter          bool
 	EnableExchangeVerbose          bool
+	ExchangePurgeCredentials       bool
 	EnableExchangeAutoPairUpdates  bool
+	DisableExchangeAutoPairUpdates bool
 	EnableExchangeRESTSupport      bool
 	EnableExchangeWebsocketSupport bool
 	MaxHTTPRequestJobsLimit        int
+	RequestTimeoutRetryAttempts    int
 
 	// Global HTTP related settings
 	GlobalHTTPTimeout   time.Duration

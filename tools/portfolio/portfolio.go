@@ -75,7 +75,7 @@ func main() {
 	}
 	log.Println("Loaded config file.")
 
-	displayCurrency = cfg.FiatDisplayCurrency
+	displayCurrency = cfg.Currency.FiatDisplayCurrency
 	port := portfolio.Base{}
 	port.Seed(cfg.Portfolio)
 	result := port.GetPortfolioSummary()
@@ -98,6 +98,13 @@ func main() {
 			fiatCurrencies = append(fiatCurrencies, y.Coin)
 		}
 	}
+
+	if len(fiatCurrencies) == 0 {
+		fiatCurrencies = common.SplitStrings(currency.DefaultCurrencies, ",")
+	}
+
+	currency.BaseCurrency = displayCurrency
+
 	err = currency.Seed(common.JoinStrings(fiatCurrencies, ","))
 	if err != nil {
 		log.Fatal(err)
@@ -127,6 +134,8 @@ func main() {
 			}
 		} else {
 			bf := bitfinex.Bitfinex{}
+			bf.SetDefaults()
+			bf.Verbose = false
 			ticker, errf := bf.GetTicker(y.Coin + "USD")
 			if errf != nil {
 				log.Println(errf)

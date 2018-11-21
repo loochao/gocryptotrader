@@ -13,6 +13,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
@@ -301,7 +302,7 @@ func (b *BTCC) WsUpdateCurrencyPairs() error {
 				availableTickers = append(availableTickers, tickerData.Symbol)
 			}
 
-			err = b.UpdateCurrencies(availableTickers, false, true)
+			err = b.UpdatePairs(availableTickers, assets.AssetTypeSpot, false, true)
 			if err != nil {
 				return fmt.Errorf("%s failed to update available currencies. %s",
 					b.Name,
@@ -324,8 +325,8 @@ func (b *BTCC) WsSubscribeToOrderbook() error {
 	mtx.Lock()
 	defer mtx.Unlock()
 
-	for _, pair := range b.GetEnabledCurrencies() {
-		formattedPair := exchange.FormatExchangeCurrency(b.GetName(), pair)
+	for _, pair := range b.GetEnabledPairs(assets.AssetTypeSpot) {
+		formattedPair := b.FormatExchangeCurrency(pair, assets.AssetTypeSpot)
 		err := b.Conn.WriteJSON(WsOutgoing{
 			Action: "SubOrderBook",
 			Symbol: formattedPair.String(),
@@ -342,8 +343,8 @@ func (b *BTCC) WsSubcribeToTicker() error {
 	mtx.Lock()
 	defer mtx.Unlock()
 
-	for _, pair := range b.GetEnabledCurrencies() {
-		formattedPair := exchange.FormatExchangeCurrency(b.GetName(), pair)
+	for _, pair := range b.GetEnabledPairs(assets.AssetTypeSpot) {
+		formattedPair := b.FormatExchangeCurrency(pair, assets.AssetTypeSpot)
 		err := b.Conn.WriteJSON(WsOutgoing{
 			Action: "Subscribe",
 			Symbol: formattedPair.String(),
@@ -360,8 +361,8 @@ func (b *BTCC) WsSubcribeToTrades() error {
 	mtx.Lock()
 	defer mtx.Unlock()
 
-	for _, pair := range b.GetEnabledCurrencies() {
-		formattedPair := exchange.FormatExchangeCurrency(b.GetName(), pair)
+	for _, pair := range b.GetEnabledPairs(assets.AssetTypeSpot) {
+		formattedPair := b.FormatExchangeCurrency(pair, assets.AssetTypeSpot)
 		err := b.Conn.WriteJSON(WsOutgoing{
 			Action: "GetTrades",
 			Symbol: formattedPair.String(),

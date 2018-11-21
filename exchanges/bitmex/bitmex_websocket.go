@@ -12,6 +12,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
@@ -116,7 +117,7 @@ func (b *Bitmex) WsConnector() error {
 		return err
 	}
 
-	if b.AuthenticatedAPISupport {
+	if b.AllowAuthenticatedRequest() {
 		err := b.websocketSendAuth()
 		if err != nil {
 			return err
@@ -292,17 +293,17 @@ func (b *Bitmex) wsHandleIncomingData() {
 	}
 }
 
-var snapshotloaded = make(map[pair.CurrencyPair]map[string]bool)
+var snapshotloaded = make(map[pair.CurrencyPair]map[assets.AssetType]bool)
 
 // ProcessOrderbook processes orderbook updates
-func (b *Bitmex) processOrderbook(data []OrderBookL2, action string, currencyPair pair.CurrencyPair, assetType string) error {
+func (b *Bitmex) processOrderbook(data []OrderBookL2, action string, currencyPair pair.CurrencyPair, assetType assets.AssetType) error {
 	if len(data) < 1 {
 		return errors.New("bitmex_websocket.go error - no orderbook data")
 	}
 
 	_, ok := snapshotloaded[currencyPair]
 	if !ok {
-		snapshotloaded[currencyPair] = make(map[string]bool)
+		snapshotloaded[currencyPair] = make(map[assets.AssetType]bool)
 	}
 
 	_, ok = snapshotloaded[currencyPair][assetType]
@@ -395,7 +396,7 @@ func (b *Bitmex) processOrderbook(data []OrderBookL2, action string, currencyPai
 
 // WebsocketSubscribe subscribes to a websocket channel
 func (b *Bitmex) websocketSubscribe() error {
-	contracts := b.GetEnabledCurrencies()
+	contracts := b.GetEnabledPairs(assets.AssetTypeSpot)
 
 	// Subscriber
 	var subscriber WebsocketRequest
@@ -430,13 +431,13 @@ func (b *Bitmex) websocketSendAuth() error {
 	newTimestamp := strconv.FormatInt(timestamp, 10)
 	hmac := common.GetHMAC(common.HashSHA256,
 		[]byte("GET/realtime"+newTimestamp),
-		[]byte(b.APISecret))
+		[]byte(b.API.Credentials.Secret))
 
 	signature := common.HexEncodeToString(hmac)
 
 	var sendAuth WebsocketRequest
 	sendAuth.Command = "authKeyExpires"
-	sendAuth.Arguments = append(sendAuth.Arguments, b.APIKey)
+	sendAuth.Arguments = append(sendAuth.Arguments, b.API.Credentials.Key)
 	sendAuth.Arguments = append(sendAuth.Arguments, timestamp)
 	sendAuth.Arguments = append(sendAuth.Arguments, signature)
 

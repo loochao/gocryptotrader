@@ -9,11 +9,8 @@ import (
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
-	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/request"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
@@ -45,95 +42,12 @@ const (
 // WEX is the overarching type across the wex package
 type WEX struct {
 	exchange.Base
-	Ticker map[string]Ticker
-}
-
-// SetDefaults sets current default value for WEX
-func (w *WEX) SetDefaults() {
-	w.Name = "WEX"
-	w.Enabled = false
-	w.Fee = 0.2
-	w.Verbose = false
-	w.RESTPollingDelay = 10
-	w.Ticker = make(map[string]Ticker)
-	w.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithAPIPermission | exchange.NoFiatWithdrawals
-	w.RequestCurrencyPairFormat.Delimiter = "_"
-	w.RequestCurrencyPairFormat.Uppercase = false
-	w.RequestCurrencyPairFormat.Separator = "-"
-	w.ConfigCurrencyPairFormat.Delimiter = "_"
-	w.ConfigCurrencyPairFormat.Uppercase = true
-	w.AssetTypes = []string{ticker.Spot}
-	w.SupportsAutoPairUpdating = true
-	w.SupportsRESTTickerBatching = true
-	w.SupportsRESTAPI = true
-	w.SupportsWebsocketAPI = false
-	w.Requester = request.New(w.Name,
-		request.NewRateLimit(time.Second, wexAuthRate),
-		request.NewRateLimit(time.Second, wexUnauthRate),
-		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
-	w.APIUrlDefault = wexAPIPublicURL
-	w.APIUrl = w.APIUrlDefault
-	w.APIUrlSecondaryDefault = wexAPIPrivateURL
-	w.APIUrlSecondary = w.APIUrlSecondaryDefault
-}
-
-// Setup sets exchange configuration parameters for WEX
-func (w *WEX) Setup(exch config.ExchangeConfig) {
-	if !exch.Enabled {
-		w.SetEnabled(false)
-	} else {
-		w.Enabled = true
-		w.AuthenticatedAPISupport = exch.AuthenticatedAPISupport
-		w.SetAPIKeys(exch.APIKey, exch.APISecret, "", false)
-		w.SetHTTPClientTimeout(exch.HTTPTimeout)
-		w.SetHTTPClientUserAgent(exch.HTTPUserAgent)
-		w.RESTPollingDelay = exch.RESTPollingDelay
-		w.Verbose = exch.Verbose
-		w.BaseCurrencies = common.SplitStrings(exch.BaseCurrencies, ",")
-		w.AvailablePairs = common.SplitStrings(exch.AvailablePairs, ",")
-		w.EnabledPairs = common.SplitStrings(exch.EnabledPairs, ",")
-		err := w.SetCurrencyPairFormat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = w.SetAssetTypes()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = w.SetAutoPairDefaults()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = w.SetAPIURL(exch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = w.SetClientProxyAddress(exch.ProxyAddress)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
-// GetTradablePairs returns a list of available pairs from the exchange
-func (w *WEX) GetTradablePairs() ([]string, error) {
-	result, err := w.GetInfo()
-	if err != nil {
-		return nil, err
-	}
-
-	var currencies []string
-	for x := range result.Pairs {
-		currencies = append(currencies, common.StringToUpper(x))
-	}
-
-	return currencies, nil
 }
 
 // GetInfo returns the WEX info
 func (w *WEX) GetInfo() (Info, error) {
 	resp := Info{}
-	req := fmt.Sprintf("%s/%s/%s/", w.APIUrl, wexAPIPublicVersion, wexInfo)
+	req := fmt.Sprintf("%s/%s/%s/", w.API.Endpoints.URL, wexAPIPublicVersion, wexInfo)
 
 	return resp, w.SendHTTPRequest(req, &resp)
 }
@@ -145,7 +59,7 @@ func (w *WEX) GetTicker(symbol string) (map[string]Ticker, error) {
 	}
 
 	response := Response{}
-	req := fmt.Sprintf("%s/%s/%s/%s", w.APIUrl, wexAPIPublicVersion, wexTicker, symbol)
+	req := fmt.Sprintf("%s/%s/%s/%s", w.API.Endpoints.URL, wexAPIPublicVersion, wexTicker, symbol)
 
 	return response.Data, w.SendHTTPRequest(req, &response.Data)
 }
@@ -157,7 +71,7 @@ func (w *WEX) GetDepth(symbol string) (Orderbook, error) {
 	}
 
 	response := Response{}
-	req := fmt.Sprintf("%s/%s/%s/%s", w.APIUrl, wexAPIPublicVersion, wexDepth, symbol)
+	req := fmt.Sprintf("%s/%s/%s/%s", w.API.Endpoints.URL, wexAPIPublicVersion, wexDepth, symbol)
 
 	return response.Data[symbol], w.SendHTTPRequest(req, &response.Data)
 }
@@ -169,7 +83,7 @@ func (w *WEX) GetTrades(symbol string) ([]Trades, error) {
 	}
 
 	response := Response{}
-	req := fmt.Sprintf("%s/%s/%s/%s", w.APIUrl, wexAPIPublicVersion, wexTrades, symbol)
+	req := fmt.Sprintf("%s/%s/%s/%s", w.API.Endpoints.URL, wexAPIPublicVersion, wexTrades, symbol)
 
 	return response.Data[symbol], w.SendHTTPRequest(req, &response.Data)
 }
@@ -361,7 +275,7 @@ func (w *WEX) SendHTTPRequest(path string, result interface{}) error {
 
 // SendAuthenticatedHTTPRequest sends an authenticated HTTP request to WEX
 func (w *WEX) SendAuthenticatedHTTPRequest(method string, values url.Values, result interface{}) (err error) {
-	if !w.AuthenticatedAPISupport {
+	if !w.AllowAuthenticatedRequest() {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet,
 			w.Name)
 	}
@@ -375,22 +289,22 @@ func (w *WEX) SendAuthenticatedHTTPRequest(method string, values url.Values, res
 	values.Set("method", method)
 
 	encoded := values.Encode()
-	hmac := common.GetHMAC(common.HashSHA512, []byte(encoded), []byte(w.APISecret))
+	hmac := common.GetHMAC(common.HashSHA512, []byte(encoded), []byte(w.API.Credentials.Secret))
 
 	if w.Verbose {
 		log.Debugf("Sending POST request to %s calling method %s with params %s\n",
-			w.APIUrlSecondary,
+			w.API.Endpoints.URLSecondary,
 			method,
 			encoded)
 	}
 
 	headers := make(map[string]string)
-	headers["Key"] = w.APIKey
+	headers["Key"] = w.API.Credentials.Key
 	headers["Sign"] = common.HexEncodeToString(hmac)
 	headers["Content-Type"] = "application/x-www-form-urlencoded"
 
 	return w.SendPayload("POST",
-		w.APIUrlSecondary,
+		w.API.Endpoints.URLSecondary,
 		headers,
 		strings.NewReader(encoded),
 		result,

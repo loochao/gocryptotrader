@@ -4,14 +4,115 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (p *Poloniex) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	p.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = p.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(p.BaseCurrencies, ",")
+
+	err := p.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = p.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets default settings for poloniex
+func (p *Poloniex) SetDefaults() {
+	p.Name = "Poloniex"
+	p.Enabled = true
+	p.Verbose = true
+	p.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithAPIPermission |
+		exchange.NoFiatWithdrawals
+	p.API.CredentialsValidator.RequiresKey = true
+	p.API.CredentialsValidator.RequiresSecret = true
+
+	p.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "_",
+			Uppercase: true,
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "_",
+			Uppercase: true,
+		},
+	}
+
+	p.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: true,
+
+			Trading: exchange.TradingSupported{
+				Spot: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: true,
+				TickerBatching:  true,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+
+	p.Requester = request.New(p.Name,
+		request.NewRateLimit(time.Second, poloniexAuthRate),
+		request.NewRateLimit(time.Second, poloniexUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+
+	p.API.Endpoints.URLDefault = poloniexAPIURL
+	p.API.Endpoints.URL = p.API.Endpoints.URLDefault
+	p.WebsocketInit()
+}
+
+// Setup sets user exchange configuration settings
+func (p *Poloniex) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		p.SetEnabled(false)
+		return nil
+	}
+
+	err := p.SetupDefaults(exch)
+	if err != nil {
+		return err
+	}
+
+	return p.WebsocketSetup(p.WsConnect,
+		exch.Name,
+		exch.Features.Enabled.Websocket,
+		poloniexWebsocketAddress,
+		exch.API.Endpoints.WebsocketURL)
+}
 
 // Start starts the Poloniex go routine
 func (p *Poloniex) Start(wg *sync.WaitGroup) {
@@ -26,38 +127,63 @@ func (p *Poloniex) Start(wg *sync.WaitGroup) {
 func (p *Poloniex) Run() {
 	if p.Verbose {
 		log.Debugf("%s Websocket: %s (url: %s).\n", p.GetName(), common.IsEnabled(p.Websocket.IsEnabled()), poloniexWebsocketAddress)
-		log.Debugf("%s polling delay: %ds.\n", p.GetName(), p.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", p.GetName(), len(p.EnabledPairs), p.EnabledPairs)
+		log.Debugf("%s %d currencies enabled: %s.\n", p.GetName(), len(p.CurrencyPairs.Spot.Enabled), p.CurrencyPairs.Spot.Enabled)
 	}
 
-	exchangeCurrencies, err := p.GetExchangeCurrencies()
+	forceUpdate := false
+	if common.StringDataCompare(p.CurrencyPairs.Spot.Available, "BTC_USDT") {
+		log.Warnf("%s contains invalid pair, forcing upgrade of available currencies.\n",
+			p.Name)
+		forceUpdate = true
+	}
+
+	if !p.GetEnabledFeatures().AutoPairUpdates && !forceUpdate {
+		return
+	}
+
+	err := p.UpdateTradablePairs(forceUpdate)
 	if err != nil {
-		log.Errorf("%s Failed to get available symbols.\n", p.GetName())
-	} else {
-		forceUpdate := false
-		if common.StringDataCompare(p.AvailablePairs, "BTC_USDT") {
-			log.Warnf("%s contains invalid pair, forcing upgrade of available currencies.\n",
-				p.GetName())
-			forceUpdate = true
-		}
-		err = p.UpdateCurrencies(exchangeCurrencies, false, forceUpdate)
-		if err != nil {
-			log.Errorf("%s Failed to update available currencies %s.\n", p.GetName(), err)
-		}
+		log.Errorf("%s failed to update tradable pairs. Err: %s", p.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (p *Poloniex) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	resp, err := p.GetTicker()
+	if err != nil {
+		return nil, err
+	}
+
+	var currencies []string
+	for x := range resp {
+		currencies = append(currencies, x)
+	}
+
+	return currencies, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (p *Poloniex) UpdateTradablePairs(forceUpgrade bool) error {
+	pairs, err := p.FetchTradablePairs(assets.AssetTypeSpot)
+	if err != nil {
+		return err
+	}
+
+	return p.UpdatePairs(pairs, assets.AssetTypeSpot, false, forceUpgrade)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (p *Poloniex) UpdateTicker(currencyPair pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (p *Poloniex) UpdateTicker(currencyPair pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := p.GetTicker()
 	if err != nil {
 		return tickerPrice, err
 	}
 
-	for _, x := range p.GetEnabledCurrencies() {
+	for _, x := range p.GetEnabledPairs(assetType) {
 		var tp ticker.Price
-		curr := exchange.FormatExchangeCurrency(p.GetName(), x).String()
+		curr := p.FormatExchangeCurrency(x, assetType).String()
 		tp.Pair = x
 		tp.Ask = tick[curr].LowestAsk
 		tp.Bid = tick[curr].HighestBid
@@ -71,7 +197,7 @@ func (p *Poloniex) UpdateTicker(currencyPair pair.CurrencyPair, assetType string
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (p *Poloniex) FetchTicker(currencyPair pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (p *Poloniex) FetchTicker(currencyPair pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(p.GetName(), currencyPair, assetType)
 	if err != nil {
 		return p.UpdateTicker(currencyPair, assetType)
@@ -80,7 +206,7 @@ func (p *Poloniex) FetchTicker(currencyPair pair.CurrencyPair, assetType string)
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (p *Poloniex) FetchOrderbook(currencyPair pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (p *Poloniex) FetchOrderbook(currencyPair pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(p.GetName(), currencyPair, assetType)
 	if err != nil {
 		return p.UpdateOrderbook(currencyPair, assetType)
@@ -89,15 +215,15 @@ func (p *Poloniex) FetchOrderbook(currencyPair pair.CurrencyPair, assetType stri
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (p *Poloniex) UpdateOrderbook(currencyPair pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (p *Poloniex) UpdateOrderbook(currencyPair pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := p.GetOrderbook("", 1000)
 	if err != nil {
 		return orderBook, err
 	}
 
-	for _, x := range p.GetEnabledCurrencies() {
-		currency := exchange.FormatExchangeCurrency(p.Name, x).String()
+	for _, x := range p.GetEnabledPairs(assetType) {
+		currency := p.FormatExchangeCurrency(x, assetType).String()
 		data, ok := orderbookNew.Data[currency]
 		if !ok {
 			continue
@@ -149,7 +275,7 @@ func (p *Poloniex) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (p *Poloniex) GetExchangeHistory(currencyPair pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (p *Poloniex) GetExchangeHistory(currencyPair pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

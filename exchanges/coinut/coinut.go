@@ -8,12 +8,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/thrasher-/gocryptotrader/common"
-	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/request"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
@@ -45,81 +42,6 @@ type COINUT struct {
 	exchange.Base
 	WebsocketConn *websocket.Conn
 	InstrumentMap map[string]int
-}
-
-// SetDefaults sets current default values
-func (c *COINUT) SetDefaults() {
-	c.Name = "COINUT"
-	c.Enabled = false
-	c.Verbose = false
-	c.TakerFee = 0.1 //spot
-	c.MakerFee = 0
-	c.Verbose = false
-	c.RESTPollingDelay = 10
-	c.APIWithdrawPermissions = exchange.WithdrawCryptoViaWebsiteOnly | exchange.WithdrawFiatViaWebsiteOnly
-	c.RequestCurrencyPairFormat.Delimiter = ""
-	c.RequestCurrencyPairFormat.Uppercase = true
-	c.ConfigCurrencyPairFormat.Delimiter = ""
-	c.ConfigCurrencyPairFormat.Uppercase = true
-	c.AssetTypes = []string{ticker.Spot}
-	c.SupportsAutoPairUpdating = true
-	c.SupportsRESTTickerBatching = false
-	c.SupportsRESTAPI = true
-	c.SupportsWebsocketAPI = true
-	c.Requester = request.New(c.Name,
-		request.NewRateLimit(time.Second, coinutAuthRate),
-		request.NewRateLimit(time.Second, coinutUnauthRate),
-		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
-	c.APIUrlDefault = coinutAPIURL
-	c.APIUrl = c.APIUrlDefault
-	c.WebsocketInit()
-}
-
-// Setup sets the current exchange configuration
-func (c *COINUT) Setup(exch config.ExchangeConfig) {
-	if !exch.Enabled {
-		c.SetEnabled(false)
-	} else {
-		c.Enabled = true
-		c.AuthenticatedAPISupport = exch.AuthenticatedAPISupport
-		c.SetAPIKeys(exch.APIKey, exch.APISecret, exch.ClientID, false)
-		c.SetHTTPClientTimeout(exch.HTTPTimeout)
-		c.SetHTTPClientUserAgent(exch.HTTPUserAgent)
-		c.RESTPollingDelay = exch.RESTPollingDelay
-		c.Verbose = exch.Verbose
-		c.Websocket.SetEnabled(exch.Websocket)
-		c.BaseCurrencies = common.SplitStrings(exch.BaseCurrencies, ",")
-		c.AvailablePairs = common.SplitStrings(exch.AvailablePairs, ",")
-		c.EnabledPairs = common.SplitStrings(exch.EnabledPairs, ",")
-		err := c.SetCurrencyPairFormat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = c.SetAssetTypes()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = c.SetAutoPairDefaults()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = c.SetAPIURL(exch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = c.SetClientProxyAddress(exch.ProxyAddress)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = c.WebsocketSetup(c.WsConnect,
-			exch.Name,
-			exch.Websocket,
-			coinutWebsocketURL,
-			exch.WebsocketURL)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
 }
 
 // GetInstruments returns instruments
@@ -332,7 +254,7 @@ func (c *COINUT) GetOpenPositions(instrumentID int) ([]OpenPosition, error) {
 
 // SendHTTPRequest sends either an authenticated or unauthenticated HTTP request
 func (c *COINUT) SendHTTPRequest(apiRequest string, params map[string]interface{}, authenticated bool, result interface{}) (err error) {
-	if !c.AuthenticatedAPISupport && authenticated {
+	if !c.API.AuthenticatedSupport && authenticated {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet, c.Name)
 	}
 
@@ -359,13 +281,13 @@ func (c *COINUT) SendHTTPRequest(apiRequest string, params map[string]interface{
 
 	headers := make(map[string]string)
 	if authenticated {
-		headers["X-USER"] = c.ClientID
-		hmac := common.GetHMAC(common.HashSHA256, []byte(payload), []byte(c.APISecret))
+		headers["X-USER"] = c.API.Credentials.ClientID
+		hmac := common.GetHMAC(common.HashSHA256, []byte(payload), []byte(c.API.Credentials.Key))
 		headers["X-SIGNATURE"] = common.HexEncodeToString(hmac)
 	}
 	headers["Content-Type"] = "application/json"
 
-	return c.SendPayload("POST", c.APIUrl, headers, bytes.NewBuffer(payload), result, authenticated, c.Verbose)
+	return c.SendPayload("POST", c.API.Endpoints.URL, headers, bytes.NewBuffer(payload), result, authenticated, c.Verbose)
 }
 
 // GetFee returns an estimate of fee based on type of transaction

@@ -17,6 +17,18 @@ type SpotInstrument struct {
 	TickSize       float64 `json:"tick_size,string"`
 }
 
+// FuturesInstrument stores the futures instrument info
+type FuturesInstrument struct {
+	InstrumentID    string  `json:"instrument_id"`
+	UnderlyingIndex string  `json:"underlying_index"`
+	QuoteCurrency   string  `json:"quote_currency"`
+	TickSize        float64 `json:"tick_size,string"`
+	ContractVal     int     `json:"contract_val,string"`
+	Listing         string  `json:"listing"`
+	Delivery        string  `json:"delivery"`
+	TradeIncrement  int     `json:"trade_increment,string"`
+}
+
 // ContractPrice holds date and ticker price price for contracts.
 type ContractPrice struct {
 	Date   string `json:"date"`

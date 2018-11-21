@@ -10,12 +10,8 @@ import (
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
-	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/request"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
-	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
 const (
@@ -62,71 +58,6 @@ type HUOBIHADAX struct {
 	exchange.Base
 }
 
-// SetDefaults sets default values for the exchange
-func (h *HUOBIHADAX) SetDefaults() {
-	h.Name = "HuobiHadax"
-	h.Enabled = false
-	h.Fee = 0
-	h.Verbose = false
-	h.RESTPollingDelay = 10
-	h.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithSetup | exchange.NoFiatWithdrawals
-	h.RequestCurrencyPairFormat.Delimiter = ""
-	h.RequestCurrencyPairFormat.Uppercase = false
-	h.ConfigCurrencyPairFormat.Delimiter = "-"
-	h.ConfigCurrencyPairFormat.Uppercase = true
-	h.AssetTypes = []string{ticker.Spot}
-	h.SupportsAutoPairUpdating = true
-	h.SupportsRESTTickerBatching = false
-	h.SupportsRESTAPI = true
-	h.SupportsWebsocketAPI = false
-	h.Requester = request.New(h.Name,
-		request.NewRateLimit(time.Second*10, huobihadaxAuthRate),
-		request.NewRateLimit(time.Second*10, huobihadaxUnauthRate),
-		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
-	h.APIUrlDefault = huobihadaxAPIURL
-	h.APIUrl = h.APIUrlDefault
-}
-
-// Setup sets user configuration
-func (h *HUOBIHADAX) Setup(exch config.ExchangeConfig) {
-	if !exch.Enabled {
-		h.SetEnabled(false)
-	} else {
-		h.Enabled = true
-		h.AuthenticatedAPISupport = exch.AuthenticatedAPISupport
-		h.SetAPIKeys(exch.APIKey, exch.APISecret, "", false)
-		h.APIAuthPEMKeySupport = exch.APIAuthPEMKeySupport
-		h.APIAuthPEMKey = exch.APIAuthPEMKey
-		h.SetHTTPClientTimeout(exch.HTTPTimeout)
-		h.SetHTTPClientUserAgent(exch.HTTPUserAgent)
-		h.RESTPollingDelay = exch.RESTPollingDelay
-		h.Verbose = exch.Verbose
-		h.BaseCurrencies = common.SplitStrings(exch.BaseCurrencies, ",")
-		h.AvailablePairs = common.SplitStrings(exch.AvailablePairs, ",")
-		h.EnabledPairs = common.SplitStrings(exch.EnabledPairs, ",")
-		err := h.SetCurrencyPairFormat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = h.SetAssetTypes()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = h.SetAutoPairDefaults()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = h.SetAPIURL(exch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = h.SetClientProxyAddress(exch.ProxyAddress)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
 // GetSpotKline returns kline data
 // KlinesRequestParams holds the Kline request params
 func (h *HUOBIHADAX) GetSpotKline(arg KlinesRequestParams) ([]KlineItem, error) {
@@ -144,7 +75,7 @@ func (h *HUOBIHADAX) GetSpotKline(arg KlinesRequestParams) ([]KlineItem, error) 
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/%s", h.APIUrl, huobihadaxMarketHistoryKline)
+	url := fmt.Sprintf("%s/%s", h.API.Endpoints.URL, huobihadaxMarketHistoryKline)
 
 	err := h.SendHTTPRequest(common.EncodeURLValues(url, vals), &result)
 	if result.ErrorMessage != "" {
@@ -164,7 +95,7 @@ func (h *HUOBIHADAX) GetMarketDetailMerged(symbol string) (DetailMerged, error) 
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/%s", h.APIUrl, huobihadaxMarketDetailMerged)
+	url := fmt.Sprintf("%s/%s", h.API.Endpoints.URL, huobihadaxMarketDetailMerged)
 
 	err := h.SendHTTPRequest(common.EncodeURLValues(url, vals), &result)
 	if result.ErrorMessage != "" {
@@ -188,7 +119,7 @@ func (h *HUOBIHADAX) GetDepth(symbol, depthType string) (Orderbook, error) {
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/%s", h.APIUrl, huobihadaxMarketDepth)
+	url := fmt.Sprintf("%s/%s", h.API.Endpoints.URL, huobihadaxMarketDepth)
 
 	err := h.SendHTTPRequest(common.EncodeURLValues(url, vals), &result)
 	if result.ErrorMessage != "" {
@@ -210,7 +141,7 @@ func (h *HUOBIHADAX) GetTrades(symbol string) ([]Trade, error) {
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/%s", h.APIUrl, huobihadaxMarketTrade)
+	url := fmt.Sprintf("%s/%s", h.API.Endpoints.URL, huobihadaxMarketTrade)
 
 	err := h.SendHTTPRequest(common.EncodeURLValues(url, vals), &result)
 	if result.ErrorMessage != "" {
@@ -250,7 +181,7 @@ func (h *HUOBIHADAX) GetTradeHistory(symbol, size string) ([]TradeHistory, error
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/%s", h.APIUrl, huobihadaxMarketTradeHistory)
+	url := fmt.Sprintf("%s/%s", h.API.Endpoints.URL, huobihadaxMarketTradeHistory)
 
 	err := h.SendHTTPRequest(common.EncodeURLValues(url, vals), &result)
 	if result.ErrorMessage != "" {
@@ -270,7 +201,7 @@ func (h *HUOBIHADAX) GetMarketDetail(symbol string) (Detail, error) {
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/%s", h.APIUrl, huobihadaxMarketDetail)
+	url := fmt.Sprintf("%s/%s", h.API.Endpoints.URL, huobihadaxMarketDetail)
 
 	err := h.SendHTTPRequest(common.EncodeURLValues(url, vals), &result)
 	if result.ErrorMessage != "" {
@@ -287,7 +218,7 @@ func (h *HUOBIHADAX) GetSymbols() ([]Symbol, error) {
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/v%s/%s/%s", h.APIUrl, huobihadaxAPIVersion, huobihadaxAPIName, huobihadaxSymbols)
+	url := fmt.Sprintf("%s/v%s/%s/%s", h.API.Endpoints.URL, huobihadaxAPIVersion, huobihadaxAPIName, huobihadaxSymbols)
 
 	err := h.SendHTTPRequest(url, &result)
 	if result.ErrorMessage != "" {
@@ -304,7 +235,7 @@ func (h *HUOBIHADAX) GetCurrencies() ([]string, error) {
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/v%s/%s/%s", h.APIUrl, huobihadaxAPIVersion, huobihadaxAPIName, huobihadaxCurrencies)
+	url := fmt.Sprintf("%s/v%s/%s/%s", h.API.Endpoints.URL, huobihadaxAPIVersion, huobihadaxAPIName, huobihadaxCurrencies)
 
 	err := h.SendHTTPRequest(url, &result)
 	if result.ErrorMessage != "" {
@@ -321,7 +252,7 @@ func (h *HUOBIHADAX) GetTimestamp() (int64, error) {
 	}
 
 	var result response
-	url := fmt.Sprintf("%s/v%s/%s", h.APIUrl, huobihadaxAPIVersion, huobihadaxTimestamp)
+	url := fmt.Sprintf("%s/v%s/%s", h.API.Endpoints.URL, huobihadaxAPIVersion, huobihadaxTimestamp)
 
 	err := h.SendHTTPRequest(url, &result)
 	if result.ErrorMessage != "" {
@@ -815,12 +746,12 @@ func (h *HUOBIHADAX) SendHTTPRequest(path string, result interface{}) error {
 
 // SendAuthenticatedHTTPPostRequest sends authenticated requests to the HUOBI API
 func (h *HUOBIHADAX) SendAuthenticatedHTTPPostRequest(method, endpoint, postBodyValues string, result interface{}) error {
-	if !h.AuthenticatedAPISupport {
+	if !h.AllowAuthenticatedRequest() {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet, h.Name)
 	}
 
 	signatureParams := url.Values{}
-	signatureParams.Set("AccessKeyId", h.APIKey)
+	signatureParams.Set("AccessKeyId", h.API.Credentials.Key)
 	signatureParams.Set("SignatureMethod", "HmacSHA256")
 	signatureParams.Set("SignatureVersion", "2")
 	signatureParams.Set("Timestamp", time.Now().UTC().Format("2006-01-02T15:04:05"))
@@ -833,10 +764,10 @@ func (h *HUOBIHADAX) SendAuthenticatedHTTPPostRequest(method, endpoint, postBody
 	headers["Content-Type"] = "application/json"
 	headers["Accept-Language"] = "zh-cn"
 
-	hmac := common.GetHMAC(common.HashSHA256, []byte(payload), []byte(h.APISecret))
+	hmac := common.GetHMAC(common.HashSHA256, []byte(payload), []byte(h.API.Credentials.Secret))
 	signatureParams.Set("Signature", common.Base64Encode(hmac))
 
-	url := fmt.Sprintf("%s%s", h.APIUrl, endpoint)
+	url := fmt.Sprintf("%s%s", h.API.Endpoints.URL, endpoint)
 	url = common.EncodeURLValues(url, signatureParams)
 
 	return h.SendPayload(method, url, headers, bytes.NewBufferString(postBodyValues), result, true, h.Verbose)
@@ -844,11 +775,11 @@ func (h *HUOBIHADAX) SendAuthenticatedHTTPPostRequest(method, endpoint, postBody
 
 // SendAuthenticatedHTTPRequest sends authenticated requests to the HUOBI API
 func (h *HUOBIHADAX) SendAuthenticatedHTTPRequest(method, endpoint string, values url.Values, result interface{}) error {
-	if !h.AuthenticatedAPISupport {
+	if !h.AllowAuthenticatedRequest() {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet, h.Name)
 	}
 
-	values.Set("AccessKeyId", h.APIKey)
+	values.Set("AccessKeyId", h.API.Credentials.Key)
 	values.Set("SignatureMethod", "HmacSHA256")
 	values.Set("SignatureVersion", "2")
 	values.Set("Timestamp", time.Now().UTC().Format("2006-01-02T15:04:05"))
@@ -860,10 +791,10 @@ func (h *HUOBIHADAX) SendAuthenticatedHTTPRequest(method, endpoint string, value
 	headers := make(map[string]string)
 	headers["Content-Type"] = "application/x-www-form-urlencoded"
 
-	hmac := common.GetHMAC(common.HashSHA256, []byte(payload), []byte(h.APISecret))
+	hmac := common.GetHMAC(common.HashSHA256, []byte(payload), []byte(h.API.Credentials.Secret))
 	values.Set("Signature", common.Base64Encode(hmac))
 
-	url := fmt.Sprintf("%s%s", h.APIUrl, endpoint)
+	url := fmt.Sprintf("%s%s", h.API.Endpoints.URL, endpoint)
 	url = common.EncodeURLValues(url, values)
 
 	return h.SendPayload(method, url, headers, bytes.NewBufferString(""), result, true, h.Verbose)

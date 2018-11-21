@@ -20,14 +20,16 @@ var supportedMethods = []string{"GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS
 // Const vars for rate limiter
 const (
 	DefaultMaxRequestJobs       = 50
-	proxyTLSTimeout             = 15 * time.Second
-	defaultTimeoutRetryAttempts = 3
+	DefaultTimeoutRetryAttempts = 3
+
+	proxyTLSTimeout = 15 * time.Second
 )
 
 // Vars for rate limiter
 var (
-	MaxRequestJobs     = DefaultMaxRequestJobs
-	DisableRateLimiter bool
+	MaxRequestJobs       = DefaultMaxRequestJobs
+	TimeoutRetryAttempts = DefaultTimeoutRetryAttempts
+	DisableRateLimiter   bool
 )
 
 // Requester struct for the request client
@@ -224,7 +226,7 @@ func New(name string, authLimit, unauthLimit *RateLimit, httpRequester *http.Cli
 		AuthLimit:            authLimit,
 		Name:                 name,
 		Jobs:                 make(chan Job, MaxRequestJobs),
-		timeoutRetryAttempts: defaultTimeoutRetryAttempts,
+		timeoutRetryAttempts: TimeoutRetryAttempts,
 	}
 }
 

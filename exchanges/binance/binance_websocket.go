@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
+
 	"github.com/gorilla/websocket"
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
@@ -28,7 +30,7 @@ var m sync.Mutex
 func (b *Binance) SeedLocalCache(p pair.CurrencyPair) error {
 	var newOrderBook orderbook.Base
 
-	formattedPair := exchange.FormatExchangeCurrency(b.Name, p)
+	formattedPair := b.FormatExchangeCurrency(p, assets.AssetTypeSpot)
 
 	orderbookNew, err := b.GetOrderBook(
 		OrderBookDataRequestParams{
@@ -133,16 +135,16 @@ func (b *Binance) WSConnect() error {
 
 	ticker := strings.ToLower(
 		strings.Replace(
-			strings.Join(b.EnabledPairs, "@ticker/"), "-", "", -1)) + "@ticker"
+			strings.Join(b.CurrencyPairs.Spot.Enabled, "@ticker/"), "-", "", -1)) + "@ticker"
 	trade := strings.ToLower(
 		strings.Replace(
-			strings.Join(b.EnabledPairs, "@trade/"), "-", "", -1)) + "@trade"
+			strings.Join(b.CurrencyPairs.Spot.Enabled, "@trade/"), "-", "", -1)) + "@trade"
 	kline := strings.ToLower(
 		strings.Replace(
-			strings.Join(b.EnabledPairs, "@kline_1m/"), "-", "", -1)) + "@kline_1m"
+			strings.Join(b.CurrencyPairs.Spot.Enabled, "@kline_1m/"), "-", "", -1)) + "@kline_1m"
 	depth := strings.ToLower(
 		strings.Replace(
-			strings.Join(b.EnabledPairs, "@depth/"), "-", "", -1)) + "@depth"
+			strings.Join(b.CurrencyPairs.Spot.Enabled, "@depth/"), "-", "", -1)) + "@depth"
 
 	wsurl := b.Websocket.GetWebsocketURL() +
 		"/stream?streams=" +
@@ -164,7 +166,7 @@ func (b *Binance) WSConnect() error {
 		Dialer.Proxy = http.ProxyURL(url)
 	}
 
-	for _, ePair := range b.GetEnabledCurrencies() {
+	for _, ePair := range b.GetEnabledPairs(assets.AssetTypeSpot) {
 		err := b.SeedLocalCache(ePair)
 		if err != nil {
 			return err

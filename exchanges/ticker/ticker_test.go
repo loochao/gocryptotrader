@@ -11,6 +11,8 @@ import (
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 )
 
+const Spot = "SPOT"
+
 func TestPriceToString(t *testing.T) {
 	newPair := pair.NewCurrencyPair("BTC", "USD")
 	priceStruct := Price{

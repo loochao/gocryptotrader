@@ -6,14 +6,114 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (b *Bitfinex) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	b.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = b.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(b.BaseCurrencies, ",")
+
+	err := b.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if b.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = b.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets the basic defaults for bitfinex
+func (b *Bitfinex) SetDefaults() {
+	b.Name = "Bitfinex"
+	b.Enabled = true
+	b.Verbose = true
+	b.WebsocketSubdChannels = make(map[int]WebsocketChanInfo)
+	b.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithAPIPermission | exchange.AutoWithdrawFiatWithAPIPermission
+	b.API.CredentialsValidator.RequiresKey = true
+	b.API.CredentialsValidator.RequiresSecret = true
+
+	b.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+	}
+
+	b.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: true,
+
+			Trading: exchange.TradingSupported{
+				Spot:   true,
+				Margin: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: true,
+				TickerBatching:  true,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+
+	b.Requester = request.New(b.Name,
+		request.NewRateLimit(time.Second*60, bitfinexAuthRate),
+		request.NewRateLimit(time.Second*60, bitfinexUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+
+	b.API.Endpoints.URLDefault = bitfinexAPIURLBase
+	b.API.Endpoints.URL = b.API.Endpoints.URLDefault
+	b.WebsocketInit()
+}
+
+// Setup takes in the supplied exchange configuration details and sets params
+func (b *Bitfinex) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		b.SetEnabled(false)
+		return nil
+	}
+
+	err := b.SetupDefaults(exch)
+	if err != nil {
+		return err
+	}
+
+	return b.WebsocketSetup(b.WsConnect,
+		exch.Name,
+		exch.Features.Enabled.Websocket,
+		bitfinexWebsocket,
+		exch.API.Endpoints.WebsocketURL)
+}
 
 // Start starts the Bitfinex go routine
 func (b *Bitfinex) Start(wg *sync.WaitGroup) {
@@ -28,25 +128,39 @@ func (b *Bitfinex) Start(wg *sync.WaitGroup) {
 func (b *Bitfinex) Run() {
 	if b.Verbose {
 		log.Debugf("%s Websocket: %s.", b.GetName(), common.IsEnabled(b.Websocket.IsEnabled()))
-		log.Debugf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
+		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.CurrencyPairs.Spot.Enabled), b.CurrencyPairs.Spot.Enabled)
 	}
 
-	exchangeProducts, err := b.GetSymbols()
+	if !b.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
+
+	err := b.UpdateTradablePairs(false)
 	if err != nil {
-		log.Errorf("%s Failed to get available symbols.\n", b.GetName())
-	} else {
-		err = b.UpdateCurrencies(exchangeProducts, false, false)
-		if err != nil {
-			log.Errorf("%s Failed to update available symbols.\n", b.GetName())
-		}
+		log.Errorf("%s failed to update tradable pairs. Err: %s", b.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (b *Bitfinex) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	return b.GetSymbols()
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (b *Bitfinex) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := b.FetchTradablePairs(assets.AssetTypeSpot)
+	if err != nil {
+		return err
+	}
+
+	return b.UpdatePairs(pairs, assets.AssetTypeSpot, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (b *Bitfinex) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *Bitfinex) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
-	enabledPairs := b.GetEnabledCurrencies()
+	enabledPairs := b.GetEnabledPairs(assetType)
 
 	var pairs []string
 	for x := range enabledPairs {
@@ -74,8 +188,8 @@ func (b *Bitfinex) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.P
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (b *Bitfinex) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
-	tick, err := ticker.GetTicker(b.GetName(), p, ticker.Spot)
+func (b *Bitfinex) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
+	tick, err := ticker.GetTicker(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateTicker(p, assetType)
 	}
@@ -83,7 +197,7 @@ func (b *Bitfinex) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Pr
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (b *Bitfinex) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitfinex) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateOrderbook(p, assetType)
@@ -92,7 +206,7 @@ func (b *Bitfinex) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderb
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (b *Bitfinex) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitfinex) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	urlVals := url.Values{}
 	urlVals.Set("limit_bids", "100")
@@ -169,7 +283,7 @@ func (b *Bitfinex) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (b *Bitfinex) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (b *Bitfinex) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

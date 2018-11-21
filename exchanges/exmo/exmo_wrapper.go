@@ -5,14 +5,106 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (e *EXMO) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	e.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = e.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(e.BaseCurrencies, ",")
+
+	err := e.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if e.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = e.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets the basic defaults for exmo
+func (e *EXMO) SetDefaults() {
+	e.Name = "EXMO"
+	e.Enabled = true
+	e.Verbose = true
+	e.API.CredentialsValidator.RequiresKey = true
+	e.API.CredentialsValidator.RequiresSecret = true
+	e.APIWithdrawPermissions = exchange.AutoWithdrawCryptoWithSetup |
+		exchange.NoFiatWithdrawals
+
+	e.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "_",
+			Uppercase: true,
+			Separator: ",",
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "_",
+			Uppercase: true,
+		},
+	}
+
+	e.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: false,
+
+			Trading: exchange.TradingSupported{
+				Spot: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: true,
+				TickerBatching:  false,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+
+	e.Requester = request.New(e.Name,
+		request.NewRateLimit(time.Minute, exmoAuthRate),
+		request.NewRateLimit(time.Minute, exmoUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+
+	e.API.Endpoints.URLDefault = exmoAPIURL
+	e.API.Endpoints.URL = e.API.Endpoints.URLDefault
+}
+
+// Setup takes in the supplied exchange configuration details and sets params
+func (e *EXMO) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		e.SetEnabled(false)
+		return nil
+	}
+
+	return e.SetupDefaults(exch)
+}
 
 // Start starts the EXMO go routine
 func (e *EXMO) Start(wg *sync.WaitGroup) {
@@ -26,29 +118,49 @@ func (e *EXMO) Start(wg *sync.WaitGroup) {
 // Run implements the EXMO wrapper
 func (e *EXMO) Run() {
 	if e.Verbose {
-		log.Debugf("%s polling delay: %ds.\n", e.GetName(), e.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", e.GetName(), len(e.EnabledPairs), e.EnabledPairs)
+		log.Debugf("%s %d currencies enabled: %s.\n", e.GetName(), len(e.CurrencyPairs.Spot.Enabled), e.CurrencyPairs.Spot.Enabled)
 	}
 
-	exchangeProducts, err := e.GetPairSettings()
+	if !e.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
+
+	err := e.UpdateTradablePairs(false)
 	if err != nil {
-		log.Errorf("%s Failed to get available products.\n", e.GetName())
-	} else {
-		var currencies []string
-		for x := range exchangeProducts {
-			currencies = append(currencies, x)
-		}
-		err = e.UpdateCurrencies(currencies, false, false)
-		if err != nil {
-			log.Errorf("%s Failed to update available currencies.\n", e.GetName())
-		}
+		log.Errorf("%s failed to update tradable pairs. Err: %s", e.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (e *EXMO) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	pairs, err := e.GetPairSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	var currencies []string
+	for x := range pairs {
+		currencies = append(currencies, x)
+	}
+
+	return currencies, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (e *EXMO) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := e.FetchTradablePairs(assets.AssetTypeSpot)
+	if err != nil {
+		return err
+	}
+
+	return e.UpdatePairs(pairs, assets.AssetTypeSpot, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (e *EXMO) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (e *EXMO) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
-	pairsCollated, err := exchange.GetAndFormatExchangeCurrencies(e.Name, e.GetEnabledCurrencies())
+	pairsCollated, err := e.FormatExchangeCurrencies(e.GetEnabledPairs(assetType), assetType)
 	if err != nil {
 		return tickerPrice, err
 	}
@@ -58,8 +170,8 @@ func (e *EXMO) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price
 		return tickerPrice, err
 	}
 
-	for _, x := range e.GetEnabledCurrencies() {
-		currency := exchange.FormatExchangeCurrency(e.Name, x).String()
+	for _, x := range e.GetEnabledPairs(assetType) {
+		currency := e.FormatExchangeCurrency(x, assetType).String()
 		var tickerPrice ticker.Price
 		tickerPrice.Pair = x
 		tickerPrice.Last = result[currency].Last
@@ -75,7 +187,7 @@ func (e *EXMO) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (e *EXMO) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (e *EXMO) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tick, err := ticker.GetTicker(e.GetName(), p, assetType)
 	if err != nil {
 		return e.UpdateTicker(p, assetType)
@@ -84,7 +196,7 @@ func (e *EXMO) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price,
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (e *EXMO) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (e *EXMO) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(e.GetName(), p, assetType)
 	if err != nil {
 		return e.UpdateOrderbook(p, assetType)
@@ -93,9 +205,9 @@ func (e *EXMO) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (e *EXMO) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (e *EXMO) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
-	pairsCollated, err := exchange.GetAndFormatExchangeCurrencies(e.Name, e.GetEnabledCurrencies())
+	pairsCollated, err := e.FormatExchangeCurrencies(e.GetEnabledPairs(assetType), assetType)
 	if err != nil {
 		return orderBook, err
 	}
@@ -105,8 +217,8 @@ func (e *EXMO) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook
 		return orderBook, err
 	}
 
-	for _, x := range e.GetEnabledCurrencies() {
-		currency := exchange.FormatExchangeCurrency(e.Name, x)
+	for _, x := range e.GetEnabledPairs(assetType) {
+		currency := e.FormatExchangeCurrency(x, assetType)
 		data, ok := result[currency.String()]
 		if !ok {
 			continue
@@ -170,7 +282,7 @@ func (e *EXMO) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (e *EXMO) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (e *EXMO) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

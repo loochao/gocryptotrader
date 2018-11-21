@@ -5,14 +5,102 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (i *ItBit) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	i.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = i.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(i.BaseCurrencies, ",")
+
+	err := i.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if i.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = i.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets the defaults for the exchange
+func (i *ItBit) SetDefaults() {
+	i.Name = "ITBIT"
+	i.Enabled = true
+	i.Verbose = true
+	i.APIWithdrawPermissions = exchange.WithdrawCryptoViaWebsiteOnly | exchange.WithdrawFiatViaWebsiteOnly
+	i.API.CredentialsValidator.RequiresClientID = true
+	i.API.CredentialsValidator.RequiresSecret = true
+
+	i.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+	}
+
+	i.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: false,
+
+			Trading: exchange.TradingSupported{
+				Spot: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: false,
+				TickerBatching:  false,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: false,
+		},
+	}
+
+	i.Requester = request.New(i.Name,
+		request.NewRateLimit(time.Second, itbitAuthRate),
+		request.NewRateLimit(time.Second, itbitUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+
+	i.API.Endpoints.URLDefault = itbitAPIURL
+	i.API.Endpoints.URL = i.API.Endpoints.URLDefault
+}
+
+// Setup sets the exchange parameters from exchange config
+func (i *ItBit) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		i.SetEnabled(false)
+		return nil
+	}
+
+	return i.SetupDefaults(exch)
+}
 
 // Start starts the ItBit go routine
 func (i *ItBit) Start(wg *sync.WaitGroup) {
@@ -26,16 +114,25 @@ func (i *ItBit) Start(wg *sync.WaitGroup) {
 // Run implements the ItBit wrapper
 func (i *ItBit) Run() {
 	if i.Verbose {
-		log.Debugf("%s polling delay: %ds.\n", i.GetName(), i.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", i.GetName(), len(i.EnabledPairs), i.EnabledPairs)
+		log.Debugf("%s %d currencies enabled: %s.\n", i.GetName(), len(i.CurrencyPairs.Spot.Enabled), i.CurrencyPairs.Spot.Enabled)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (i *ItBit) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (i *ItBit) UpdateTradablePairs(forceUpdate bool) error {
+	return common.ErrFunctionNotSupported
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (i *ItBit) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (i *ItBit) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
-	tick, err := i.GetTicker(exchange.FormatExchangeCurrency(i.Name,
-		p).String())
+	tick, err := i.GetTicker(i.FormatExchangeCurrency(p, assetType).String())
 	if err != nil {
 		return tickerPrice, err
 	}
@@ -52,7 +149,7 @@ func (i *ItBit) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Pric
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (i *ItBit) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (i *ItBit) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(i.GetName(), p, assetType)
 	if err != nil {
 		return i.UpdateTicker(p, assetType)
@@ -61,7 +158,7 @@ func (i *ItBit) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (i *ItBit) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (i *ItBit) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(i.GetName(), p, assetType)
 	if err != nil {
 		return i.UpdateOrderbook(p, assetType)
@@ -70,10 +167,9 @@ func (i *ItBit) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (i *ItBit) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (i *ItBit) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
-	orderbookNew, err := i.GetOrderbook(exchange.FormatExchangeCurrency(i.Name,
-		p).String())
+	orderbookNew, err := i.GetOrderbook(i.FormatExchangeCurrency(p, assetType).String())
 	if err != nil {
 		return orderBook, err
 	}
@@ -157,7 +253,7 @@ func (i *ItBit) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (i *ItBit) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (i *ItBit) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

@@ -4,14 +4,105 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (g *Gateio) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	g.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = g.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(g.BaseCurrencies, ",")
+
+	err := g.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if g.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = g.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets default values for the exchange
+func (g *Gateio) SetDefaults() {
+	g.Name = "GateIO"
+	g.Enabled = true
+	g.Verbose = true
+	g.APIWithdrawPermissions = exchange.AutoWithdrawCrypto | exchange.NoFiatWithdrawals
+	g.API.CredentialsValidator.RequiresKey = true
+	g.API.CredentialsValidator.RequiresSecret = true
+
+	g.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "_",
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Delimiter: "_",
+			Uppercase: true,
+		},
+	}
+
+	g.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: false,
+
+			Trading: exchange.TradingSupported{
+				Spot: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: true,
+				TickerBatching:  true,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+
+	g.Requester = request.New(g.Name,
+		request.NewRateLimit(time.Second*10, gateioAuthRate),
+		request.NewRateLimit(time.Second*10, gateioUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+
+	g.API.Endpoints.URLDefault = gateioTradeURL
+	g.API.Endpoints.URL = g.API.Endpoints.URLDefault
+	g.API.Endpoints.URLSecondaryDefault = gateioMarketURL
+	g.API.Endpoints.URLSecondary = g.API.Endpoints.URLSecondaryDefault
+}
+
+// Setup sets user configuration
+func (g *Gateio) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		g.SetEnabled(false)
+		return nil
+	}
+
+	return g.SetupDefaults(exch)
+}
 
 // Start starts the GateIO go routine
 func (g *Gateio) Start(wg *sync.WaitGroup) {
@@ -25,31 +116,45 @@ func (g *Gateio) Start(wg *sync.WaitGroup) {
 // Run implements the GateIO wrapper
 func (g *Gateio) Run() {
 	if g.Verbose {
-		log.Debugf("%s polling delay: %ds.\n", g.GetName(), g.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", g.GetName(), len(g.EnabledPairs), g.EnabledPairs)
+		log.Debugf("%s %d currencies enabled: %s.\n", g.GetName(), len(g.CurrencyPairs.Spot.Enabled), g.CurrencyPairs.Spot.Enabled)
 	}
 
-	symbols, err := g.GetSymbols()
+	if !g.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
+
+	err := g.UpdateTradablePairs(false)
 	if err != nil {
-		log.Errorf("%s Unable to fetch symbols.\n", g.GetName())
-	} else {
-		err = g.UpdateCurrencies(symbols, false, false)
-		if err != nil {
-			log.Errorf("%s Failed to update available currencies.\n", g.GetName())
-		}
+		log.Errorf("%s failed to update tradable pairs. Err: %s", g.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (g *Gateio) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	return g.GetSymbols()
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (g *Gateio) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := g.FetchTradablePairs(assets.AssetTypeSpot)
+	if err != nil {
+		return err
+	}
+
+	return g.UpdatePairs(pairs, assets.AssetTypeSpot, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (g *Gateio) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (g *Gateio) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	result, err := g.GetTickers()
 	if err != nil {
 		return tickerPrice, err
 	}
 
-	for _, x := range g.GetEnabledCurrencies() {
-		currency := exchange.FormatExchangeCurrency(g.Name, x).String()
+	for _, x := range g.GetEnabledPairs(assetType) {
+		currency := g.FormatExchangeCurrency(x, assetType).String()
 		var tp ticker.Price
 		tp.Pair = x
 		tp.High = result[currency].High
@@ -64,7 +169,7 @@ func (g *Gateio) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Pri
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (g *Gateio) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (g *Gateio) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tickerNew, err := ticker.GetTicker(g.GetName(), p, assetType)
 	if err != nil {
 		return g.UpdateTicker(p, assetType)
@@ -73,7 +178,7 @@ func (g *Gateio) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Pric
 }
 
 // FetchOrderbook returns orderbook base on the currency pair
-func (g *Gateio) FetchOrderbook(currency pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (g *Gateio) FetchOrderbook(currency pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(g.GetName(), currency, assetType)
 	if err != nil {
 		return g.UpdateOrderbook(currency, assetType)
@@ -82,9 +187,9 @@ func (g *Gateio) FetchOrderbook(currency pair.CurrencyPair, assetType string) (o
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (g *Gateio) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (g *Gateio) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
-	currency := exchange.FormatExchangeCurrency(g.Name, p).String()
+	currency := g.FormatExchangeCurrency(p, assetType).String()
 
 	orderbookNew, err := g.GetOrderbook(currency)
 	if err != nil {
@@ -174,7 +279,7 @@ func (g *Gateio) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (g *Gateio) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (g *Gateio) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented
@@ -224,7 +329,8 @@ func (g *Gateio) CancelOrder(order exchange.OrderCancellation) error {
 	if err != nil {
 		return err
 	}
-	_, err = g.CancelExistingOrder(orderIDInt, exchange.FormatExchangeCurrency(g.Name, order.CurrencyPair).String())
+	_, err = g.CancelExistingOrder(orderIDInt, g.FormatExchangeCurrency(order.CurrencyPair,
+		order.AssetType).String())
 
 	return err
 }

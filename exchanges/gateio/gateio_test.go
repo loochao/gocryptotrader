@@ -32,9 +32,9 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - GateIO Setup() init error")
 	}
 
-	gateioConfig.AuthenticatedAPISupport = true
-	gateioConfig.APIKey = apiKey
-	gateioConfig.APISecret = apiSecret
+	gateioConfig.API.AuthenticatedSupport = true
+	gateioConfig.API.Credentials.Key = apiKey
+	gateioConfig.API.Credentials.Secret = apiSecret
 
 	g.Setup(gateioConfig)
 }
@@ -254,11 +254,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func areTestAPIKeysSet() bool {
-	if g.APIKey != "" && g.APIKey != "Key" &&
-		g.APISecret != "" && g.APISecret != "Secret" {
-		return true
-	}
-	return false
+	return g.ValidateAPICredentials()
 }
 
 func TestSubmitOrder(t *testing.T) {
@@ -274,6 +270,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.LTC,
 		SecondCurrency: symbol.BTC,
 	}
+
 	response, err := g.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 10, "1234234")
 	if areTestAPIKeysSet() && (err != nil || !response.IsOrderPlaced) {
 		t.Errorf("Order failed to be placed: %v", err)

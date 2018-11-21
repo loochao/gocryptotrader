@@ -1,10 +1,12 @@
 package exchange
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/nonce"
 	"github.com/thrasher-/gocryptotrader/exchanges/request"
 )
@@ -15,7 +17,7 @@ type FeeType string
 // InternationalBankTransactionType custom type for calculating fees based on fiat transaction types
 type InternationalBankTransactionType string
 
-// Const declarations for fee types
+// Const vars for the exchange package
 const (
 	BankFee                        FeeType = "bankFee"
 	InternationalBankDepositFee    FeeType = "internationalBankDepositFee"
@@ -23,10 +25,7 @@ const (
 	CryptocurrencyTradeFee         FeeType = "cryptocurrencyTradeFee"
 	CyptocurrencyDepositFee        FeeType = "cyptocurrencyDepositFee"
 	CryptocurrencyWithdrawalFee    FeeType = "cryptocurrencyWithdrawalFee"
-)
 
-// Const declarations for international transaction types
-const (
 	WireTransfer    InternationalBankTransactionType = "wireTransfer"
 	PerfectMoney    InternationalBankTransactionType = "perfectMoney"
 	Neteller        InternationalBankTransactionType = "neteller"
@@ -116,6 +115,62 @@ const (
 	UnknownWithdrawalTypeText string = "UNKNOWN"
 )
 
+// ModifyOrder is a an order modifyer
+// ModifyOrder is a an order modifyer
+type ModifyOrder struct {
+	OrderID string
+	OrderType
+	OrderSide
+	Price           float64
+	Amount          float64
+	LimitPriceUpper float64
+	LimitPriceLower float64
+	Currency        pair.CurrencyPair
+
+	ImmediateOrCancel bool
+	HiddenOrder       bool
+	FillOrKill        bool
+	PostOnly          bool
+}
+
+// ModifyOrderResponse is an order modifying return type
+type ModifyOrderResponse struct {
+	OrderID string
+}
+
+// CancelAllOrdersResponse returns the status from attempting to cancel all orders on an exchagne
+type CancelAllOrdersResponse struct {
+	OrderStatus map[string]string
+}
+
+// OrderType enforces a standard for Ordertypes across the code base
+type OrderType string
+
+// OrderType ...types
+const (
+	Limit  OrderType = "Limit"
+	Market OrderType = "Market"
+)
+
+// ToString changes the ordertype to the exchange standard and returns a string
+func (o OrderType) ToString() string {
+	return fmt.Sprintf("%v", o)
+}
+
+// OrderSide enforces a standard for OrderSides across the code base
+type OrderSide string
+
+// OrderSide types
+const (
+	Buy  OrderSide = "Buy"
+	Sell OrderSide = "Sell"
+)
+
+// ToString changes the ordertype to the exchange standard and returns a string
+func (o OrderSide) ToString() string {
+	return fmt.Sprintf("%v", o)
+}
+
 // AccountInfo is a Generic type to hold each exchange's holdings in
 // all enabled currencies
 type AccountInfo struct {
@@ -160,6 +215,7 @@ type OrderCancellation struct {
 	AccountID     string
 	OrderID       string
 	CurrencyPair  pair.CurrencyPair
+	AssetType     assets.AssetType
 	WalletAddress string
 	Side          OrderSide
 }
@@ -222,36 +278,135 @@ type WithdrawRequest struct {
 	WireCurrency                  string
 }
 
+// Features stores the supported and enabled features
+// for the exchange
+type Features struct {
+	Supports FeaturesSupported
+	Enabled  FeaturesEnabled
+}
+
+// FeaturesEnabled stores the exchange enabled features
+type FeaturesEnabled struct {
+	AutoPairUpdates bool
+}
+
+// ProtocolFeatures holds all variables for the exchanges supported features
+// for a protocol (e.g REST or Websocket)
+type ProtocolFeatures struct {
+	TickerBatching      bool
+	TickerFetching      bool
+	OrderbookFetching   bool
+	AutoPairUpdates     bool
+	AccountInfo         bool
+	CryptoDeposit       bool
+	CryptoWithdrawal    uint32
+	FiatWithdraw        bool
+	GetOrder            bool
+	GetOrders           bool
+	CancelOrders        bool
+	CancelOrder         bool
+	SubmitOrder         bool
+	SubmitOrders        bool
+	ModifyOrder         bool
+	DepositHistory      bool
+	WithdrawalHistory   bool
+	TradeHistory        bool
+	UserTradeHistory    bool
+	TradeFee            bool
+	FiatDepositFee      bool
+	FiatWithdrawalFee   bool
+	CryptoDepositFee    bool
+	CryptoWithdrawalFee bool
+}
+
+// TradingSupported stores the exchanges supported
+// trading assets
+type TradingSupported struct {
+	Spot           bool
+	Futures        bool
+	Margin         bool
+	PerpetualSwaps bool
+	Index          bool
+}
+
+// FeaturesSupported stores the exchanges supported features
+type FeaturesSupported struct {
+	REST                  bool
+	RESTCapabilities      ProtocolFeatures
+	Websocket             bool
+	WebsocketCapabilities ProtocolFeatures
+	Trading               TradingSupported
+}
+
+// API stores the exchange API settings
+type API struct {
+	AuthenticatedSupport bool
+	PEMKeySupport        bool
+
+	Endpoints struct {
+		URL                 string
+		URLDefault          string
+		URLSecondary        string
+		URLSecondaryDefault string
+		WebsocketURL        string
+	}
+
+	Credentials struct {
+		Key      string
+		Secret   string
+		ClientID string
+		PEMKey   string
+	}
+
+	CredentialsValidator struct {
+		// For Huobi (optional)
+		RequiresPEM bool
+
+		RequiresKey                bool
+		RequiresSecret             bool
+		RequiresClientID           bool
+		RequiresBase64DecodeSecret bool
+	}
+}
+
+// CurrencyPair stores a list of enable/available
+// currency pairs and their storage/request format
+type CurrencyPair struct {
+	Enabled       []string
+	Available     []string
+	RequestFormat config.CurrencyPairFormatConfig
+	ConfigFormat  config.CurrencyPairFormatConfig
+}
+
+// CurrencyPairs stores a list of tradable currency pair settings
+type CurrencyPairs struct {
+	RequestFormat       config.CurrencyPairFormatConfig
+	ConfigFormat        config.CurrencyPairFormatConfig
+	UseGlobalPairFormat bool
+	LastUpdated         int64
+	AssetTypes          assets.AssetTypes
+	Spot                CurrencyPair
+	Futures             CurrencyPair
+}
+
 // Base stores the individual exchange information
 type Base struct {
-	Name                                       string
-	Enabled                                    bool
-	Verbose                                    bool
-	RESTPollingDelay                           time.Duration
-	AuthenticatedAPISupport                    bool
-	APIWithdrawPermissions                     uint32
-	APIAuthPEMKeySupport                       bool
-	APISecret, APIKey, APIAuthPEMKey, ClientID string
-	Nonce                                      nonce.Nonce
-	TakerFee, MakerFee, Fee                    float64
-	BaseCurrencies                             []string
-	AvailablePairs                             []string
-	EnabledPairs                               []string
-	AssetTypes                                 []string
-	PairsLastUpdated                           int64
-	SupportsAutoPairUpdating                   bool
-	SupportsRESTTickerBatching                 bool
-	SupportsWebsocketAPI                       bool
-	SupportsRESTAPI                            bool
-	HTTPTimeout                                time.Duration
-	HTTPUserAgent                              string
-	WebsocketURL                               string
-	APIUrl                                     string
-	APIUrlDefault                              string
-	APIUrlSecondary                            string
-	APIUrlSecondaryDefault                     string
-	RequestCurrencyPairFormat                  config.CurrencyPairFormatConfig
-	ConfigCurrencyPairFormat                   config.CurrencyPairFormatConfig
-	Websocket                                  *Websocket
+	Name    string
+	Enabled bool
+	Verbose bool
+
+	APIWithdrawPermissions uint32
+	API                    API
+	Nonce                  nonce.Nonce
+	BaseCurrencies         []string
+	CurrencyPairs          CurrencyPairs
+
+	Features      Features
+	HTTPTimeout   time.Duration
+	HTTPUserAgent string
+	Websocket     *Websocket
 	*request.Requester
+
+	LoadedByConfig bool
+	Config         *config.ExchangeConfig
 }

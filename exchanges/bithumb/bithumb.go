@@ -11,12 +11,8 @@ import (
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
-	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/request"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
-	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
 const (
@@ -58,69 +54,6 @@ type Bithumb struct {
 	exchange.Base
 }
 
-// SetDefaults sets the basic defaults for Bithumb
-func (b *Bithumb) SetDefaults() {
-	b.Name = "Bithumb"
-	b.Enabled = false
-	b.Verbose = false
-	b.RESTPollingDelay = 10
-	b.APIWithdrawPermissions = exchange.AutoWithdrawCrypto | exchange.AutoWithdrawFiat
-	b.RequestCurrencyPairFormat.Delimiter = ""
-	b.RequestCurrencyPairFormat.Uppercase = true
-	b.ConfigCurrencyPairFormat.Delimiter = ""
-	b.ConfigCurrencyPairFormat.Uppercase = true
-	b.ConfigCurrencyPairFormat.Index = "KRW"
-	b.AssetTypes = []string{ticker.Spot}
-	b.SupportsAutoPairUpdating = true
-	b.SupportsRESTTickerBatching = true
-	b.SupportsRESTAPI = true
-	b.SupportsWebsocketAPI = false
-	b.Requester = request.New(b.Name,
-		request.NewRateLimit(time.Second, bithumbAuthRate),
-		request.NewRateLimit(time.Second, bithumbUnauthRate),
-		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
-	b.APIUrlDefault = apiURL
-	b.APIUrl = b.APIUrlDefault
-}
-
-// Setup takes in the supplied exchange configuration details and sets params
-func (b *Bithumb) Setup(exch config.ExchangeConfig) {
-	if !exch.Enabled {
-		b.SetEnabled(false)
-	} else {
-		b.Enabled = true
-		b.AuthenticatedAPISupport = exch.AuthenticatedAPISupport
-		b.SetAPIKeys(exch.APIKey, exch.APISecret, "", false)
-		b.SetHTTPClientTimeout(exch.HTTPTimeout)
-		b.SetHTTPClientUserAgent(exch.HTTPUserAgent)
-		b.RESTPollingDelay = exch.RESTPollingDelay
-		b.Verbose = exch.Verbose
-		b.BaseCurrencies = common.SplitStrings(exch.BaseCurrencies, ",")
-		b.AvailablePairs = common.SplitStrings(exch.AvailablePairs, ",")
-		b.EnabledPairs = common.SplitStrings(exch.EnabledPairs, ",")
-		err := b.SetCurrencyPairFormat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = b.SetAssetTypes()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = b.SetAutoPairDefaults()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = b.SetAPIURL(exch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = b.SetClientProxyAddress(exch.ProxyAddress)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
 // GetTradablePairs returns a list of tradable currencies
 func (b *Bithumb) GetTradablePairs() ([]string, error) {
 	result, err := b.GetAllTickers()
@@ -140,7 +73,7 @@ func (b *Bithumb) GetTradablePairs() ([]string, error) {
 // symbol e.g. "btc"
 func (b *Bithumb) GetTicker(symbol string) (Ticker, error) {
 	response := Ticker{}
-	path := fmt.Sprintf("%s%s%s", b.APIUrl, publicTicker, common.StringToUpper(symbol))
+	path := fmt.Sprintf("%s%s%s", b.API.Endpoints.URL, publicTicker, common.StringToUpper(symbol))
 
 	err := b.SendHTTPRequest(path, &response)
 	if err != nil {
@@ -162,7 +95,7 @@ func (b *Bithumb) GetAllTickers() (map[string]Ticker, error) {
 	}
 
 	response := Response{}
-	path := fmt.Sprintf("%s%s%s", b.APIUrl, publicTicker, "all")
+	path := fmt.Sprintf("%s%s%s", b.API.Endpoints.URL, publicTicker, "all")
 
 	err := b.SendHTTPRequest(path, &response)
 	if err != nil {
@@ -206,7 +139,7 @@ func (b *Bithumb) GetAllTickers() (map[string]Ticker, error) {
 // symbol e.g. "btc"
 func (b *Bithumb) GetOrderBook(symbol string) (Orderbook, error) {
 	response := Orderbook{}
-	path := fmt.Sprintf("%s%s%s", b.APIUrl, publicOrderBook, common.StringToUpper(symbol))
+	path := fmt.Sprintf("%s%s%s", b.API.Endpoints.URL, publicOrderBook, common.StringToUpper(symbol))
 
 	err := b.SendHTTPRequest(path, &response)
 	if err != nil {
@@ -225,7 +158,7 @@ func (b *Bithumb) GetOrderBook(symbol string) (Orderbook, error) {
 // symbol e.g. "btc"
 func (b *Bithumb) GetTransactionHistory(symbol string) (TransactionHistory, error) {
 	response := TransactionHistory{}
-	path := fmt.Sprintf("%s%s%s", b.APIUrl, publicTransactionHistory, common.StringToUpper(symbol))
+	path := fmt.Sprintf("%s%s%s", b.API.Endpoints.URL, publicTransactionHistory, common.StringToUpper(symbol))
 
 	err := b.SendHTTPRequest(path, &response)
 	if err != nil {
@@ -522,7 +455,7 @@ func (b *Bithumb) SendHTTPRequest(path string, result interface{}) error {
 
 // SendAuthenticatedHTTPRequest sends an authenticated HTTP request to bithumb
 func (b *Bithumb) SendAuthenticatedHTTPRequest(path string, params url.Values, result interface{}) error {
-	if !b.AuthenticatedAPISupport {
+	if !b.AllowAuthenticatedRequest() {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet, b.Name)
 	}
 
@@ -541,11 +474,11 @@ func (b *Bithumb) SendAuthenticatedHTTPRequest(path string, params url.Values, r
 	hmacPayload := path + string(0) + payload + string(0) + b.Nonce.String()
 	hmac := common.GetHMAC(common.HashSHA512,
 		[]byte(hmacPayload),
-		[]byte(b.APISecret))
+		[]byte(b.API.Credentials.Secret))
 	hmacStr := common.HexEncodeToString(hmac)
 
 	headers := make(map[string]string)
-	headers["Api-Key"] = b.APIKey
+	headers["Api-Key"] = b.API.Credentials.Key
 	headers["Api-Sign"] = common.Base64Encode([]byte(hmacStr))
 	headers["Api-Nonce"] = b.Nonce.String()
 	headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -558,7 +491,7 @@ func (b *Bithumb) SendAuthenticatedHTTPRequest(path string, params url.Values, r
 	}{}
 
 	err := b.SendPayload("POST",
-		b.APIUrl+path,
+		b.API.Endpoints.URL+path,
 		headers,
 		bytes.NewBufferString(payload),
 		&intermediary,

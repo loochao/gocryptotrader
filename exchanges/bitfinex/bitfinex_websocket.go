@@ -13,6 +13,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
@@ -88,13 +89,13 @@ func (b *Bitfinex) WsSendAuth() error {
 	request := make(map[string]interface{})
 	payload := "AUTH" + strconv.FormatInt(time.Now().UnixNano(), 10)[:13]
 	request["event"] = "auth"
-	request["apiKey"] = b.APIKey
+	request["apiKey"] = b.API.Credentials.Key
 
 	request["authSig"] = common.HexEncodeToString(
 		common.GetHMAC(
 			common.HashSHA512_384,
 			[]byte(payload),
-			[]byte(b.APISecret)))
+			[]byte(b.API.Credentials.Secret)))
 
 	request["authPayload"] = payload
 
@@ -165,7 +166,7 @@ func (b *Bitfinex) WsConnect() error {
 	}
 
 	for _, x := range channels {
-		for _, y := range b.EnabledPairs {
+		for _, y := range b.CurrencyPairs.Spot.Enabled {
 			params := make(map[string]string)
 			if x == "book" {
 				params["prec"] = "P0"
@@ -178,7 +179,7 @@ func (b *Bitfinex) WsConnect() error {
 		}
 	}
 
-	if b.AuthenticatedAPISupport {
+	if b.AllowAuthenticatedRequest() {
 		err = b.WsSendAuth()
 		if err != nil {
 			return err
@@ -265,7 +266,7 @@ func (b *Bitfinex) WsDataHandler() {
 							b.Websocket.DataHandler <- fmt.Errorf("bitfinex.go error - Websocket unable to AUTH. Error code: %s",
 								eventData["code"].(string))
 
-							b.AuthenticatedAPISupport = false
+							b.API.AuthenticatedSupport = false
 						}
 					}
 
@@ -511,7 +512,7 @@ func (b *Bitfinex) WsDataHandler() {
 
 // WsInsertSnapshot add the initial orderbook snapshot when subscribed to a
 // channel
-func (b *Bitfinex) WsInsertSnapshot(p pair.CurrencyPair, assetType string, books []WebsocketBook) error {
+func (b *Bitfinex) WsInsertSnapshot(p pair.CurrencyPair, assetType assets.AssetType, books []WebsocketBook) error {
 	if len(books) == 0 {
 		return errors.New("bitfinex.go error - no orderbooks submitted")
 	}
@@ -550,7 +551,7 @@ func (b *Bitfinex) WsInsertSnapshot(p pair.CurrencyPair, assetType string, books
 
 // WsUpdateOrderbook updates the orderbook list, removing and adding to the
 // orderbook sides
-func (b *Bitfinex) WsUpdateOrderbook(p pair.CurrencyPair, assetType string, book WebsocketBook) error {
+func (b *Bitfinex) WsUpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType, book WebsocketBook) error {
 
 	if book.Count > 0 {
 		if book.Amount > 0 {

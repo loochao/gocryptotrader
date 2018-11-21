@@ -4,16 +4,114 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
+	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 	"github.com/thrasher-/gocryptotrader/exchanges/orderbook"
+	"github.com/thrasher-/gocryptotrader/exchanges/request"
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
+
+// GetDefaultConfig returns a default exchange config
+func (b *Bitstamp) GetDefaultConfig() (*config.ExchangeConfig, error) {
+	b.SetDefaults()
+	exchCfg := new(config.ExchangeConfig)
+	exchCfg.Name = b.Name
+	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
+	exchCfg.BaseCurrencies = common.JoinStrings(b.BaseCurrencies, ",")
+
+	err := b.SetupDefaults(exchCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if b.Features.Supports.RESTCapabilities.AutoPairUpdates {
+		err = b.UpdateTradablePairs(true)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return exchCfg, nil
+}
+
+// SetDefaults sets default for Bitstamp
+func (b *Bitstamp) SetDefaults() {
+	b.Name = "Bitstamp"
+	b.Enabled = true
+	b.Verbose = true
+	b.APIWithdrawPermissions = exchange.AutoWithdrawCrypto | exchange.AutoWithdrawFiat
+	b.API.CredentialsValidator.RequiresKey = true
+	b.API.CredentialsValidator.RequiresSecret = true
+	b.API.CredentialsValidator.RequiresClientID = true
+
+	b.CurrencyPairs = exchange.CurrencyPairs{
+		AssetTypes: assets.AssetTypes{
+			assets.AssetTypeSpot,
+		},
+
+		UseGlobalPairFormat: true,
+		RequestFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+		ConfigFormat: config.CurrencyPairFormatConfig{
+			Uppercase: true,
+		},
+	}
+
+	b.Features = exchange.Features{
+		Supports: exchange.FeaturesSupported{
+			REST:      true,
+			Websocket: true,
+
+			Trading: exchange.TradingSupported{
+				Spot: true,
+			},
+
+			RESTCapabilities: exchange.ProtocolFeatures{
+				AutoPairUpdates: true,
+				TickerBatching:  false,
+			},
+		},
+		Enabled: exchange.FeaturesEnabled{
+			AutoPairUpdates: true,
+		},
+	}
+
+	b.Requester = request.New(b.Name,
+		request.NewRateLimit(time.Minute*10, bitstampAuthRate),
+		request.NewRateLimit(time.Minute*10, bitstampUnauthRate),
+		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
+
+	b.API.Endpoints.URLDefault = bitstampAPIURL
+	b.API.Endpoints.URL = b.API.Endpoints.URLDefault
+	b.WebsocketInit()
+}
+
+// Setup sets configuration values to bitstamp
+func (b *Bitstamp) Setup(exch *config.ExchangeConfig) error {
+	if !exch.Enabled {
+		b.SetEnabled(false)
+		return nil
+	}
+
+	err := b.SetupDefaults(exch)
+	if err != nil {
+		return err
+	}
+
+	return b.WebsocketSetup(b.WsConnect,
+		exch.Name,
+		exch.Features.Enabled.Websocket,
+		BitstampPusherKey,
+		exch.API.Endpoints.WebsocketURL)
+}
 
 // Start starts the Bitstamp go routine
 func (b *Bitstamp) Start(wg *sync.WaitGroup) {
@@ -28,31 +126,52 @@ func (b *Bitstamp) Start(wg *sync.WaitGroup) {
 func (b *Bitstamp) Run() {
 	if b.Verbose {
 		log.Debugf("%s Websocket: %s.", b.GetName(), common.IsEnabled(b.Websocket.IsEnabled()))
-		log.Debugf("%s polling delay: %ds.\n", b.GetName(), b.RESTPollingDelay)
-		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.EnabledPairs), b.EnabledPairs)
+		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.CurrencyPairs.Spot.Enabled), b.CurrencyPairs.Spot.Enabled)
 	}
 
-	pairs, err := b.GetTradingPairs()
+	if !b.GetEnabledFeatures().AutoPairUpdates {
+		return
+	}
+
+	err := b.UpdateTradablePairs(false)
 	if err != nil {
-		log.Errorf("%s failed to get trading pairs. Err: %s", b.Name, err)
-	} else {
-		var currencies []string
-		for x := range pairs {
-			if pairs[x].Trading != "Enabled" {
-				continue
-			}
-			pair := strings.Split(pairs[x].Name, "/")
-			currencies = append(currencies, pair[0]+pair[1])
-		}
-		err = b.UpdateCurrencies(currencies, false, false)
-		if err != nil {
-			log.Errorf("%s Failed to update available currencies.\n", b.Name)
-		}
+		log.Errorf("%s failed to update tradable pairs. Err: %s", b.Name, err)
 	}
 }
 
+// FetchTradablePairs returns a list of the exchanges tradable pairs
+func (b *Bitstamp) FetchTradablePairs(asset assets.AssetType) ([]string, error) {
+	pairs, err := b.GetTradingPairs()
+	if err != nil {
+		return nil, err
+	}
+
+	var products []string
+	for x := range pairs {
+		if pairs[x].Trading != "Enabled" {
+			continue
+		}
+
+		pair := common.SplitStrings(pairs[x].Name, "/")
+		products = append(products, pair[0]+pair[1])
+	}
+
+	return products, nil
+}
+
+// UpdateTradablePairs updates the exchanges available pairs and stores
+// them in the exchanges config
+func (b *Bitstamp) UpdateTradablePairs(forceUpdate bool) error {
+	pairs, err := b.FetchTradablePairs(assets.AssetTypeSpot)
+	if err != nil {
+		return err
+	}
+
+	return b.UpdatePairs(pairs, assets.AssetTypeSpot, false, forceUpdate)
+}
+
 // UpdateTicker updates and returns the ticker for a currency pair
-func (b *Bitstamp) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *Bitstamp) UpdateTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	var tickerPrice ticker.Price
 	tick, err := b.GetTicker(p.Pair().String(), false)
 	if err != nil {
@@ -71,7 +190,7 @@ func (b *Bitstamp) UpdateTicker(p pair.CurrencyPair, assetType string) (ticker.P
 }
 
 // FetchTicker returns the ticker for a currency pair
-func (b *Bitstamp) FetchTicker(p pair.CurrencyPair, assetType string) (ticker.Price, error) {
+func (b *Bitstamp) FetchTicker(p pair.CurrencyPair, assetType assets.AssetType) (ticker.Price, error) {
 	tick, err := ticker.GetTicker(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateTicker(p, assetType)
@@ -86,7 +205,7 @@ func (b *Bitstamp) GetFeeByType(feeBuilder exchange.FeeBuilder) (float64, error)
 }
 
 // FetchOrderbook returns the orderbook for a currency pair
-func (b *Bitstamp) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitstamp) FetchOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	ob, err := orderbook.GetOrderbook(b.GetName(), p, assetType)
 	if err != nil {
 		return b.UpdateOrderbook(p, assetType)
@@ -95,7 +214,7 @@ func (b *Bitstamp) FetchOrderbook(p pair.CurrencyPair, assetType string) (orderb
 }
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
-func (b *Bitstamp) UpdateOrderbook(p pair.CurrencyPair, assetType string) (orderbook.Base, error) {
+func (b *Bitstamp) UpdateOrderbook(p pair.CurrencyPair, assetType assets.AssetType) (orderbook.Base, error) {
 	var orderBook orderbook.Base
 	orderbookNew, err := b.GetOrderbook(p.Pair().String())
 	if err != nil {
@@ -160,7 +279,7 @@ func (b *Bitstamp) GetFundingHistory() ([]exchange.FundHistory, error) {
 }
 
 // GetExchangeHistory returns historic trade data since exchange opening.
-func (b *Bitstamp) GetExchangeHistory(p pair.CurrencyPair, assetType string) ([]exchange.TradeHistory, error) {
+func (b *Bitstamp) GetExchangeHistory(p pair.CurrencyPair, assetType assets.AssetType) ([]exchange.TradeHistory, error) {
 	var resp []exchange.TradeHistory
 
 	return resp, common.ErrNotYetImplemented

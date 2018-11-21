@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/thrasher-/gocryptotrader/currency/pair"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 )
 
 // Const values for orderbook package
@@ -37,12 +38,12 @@ type Base struct {
 	Bids         []Item            `json:"bids"`
 	Asks         []Item            `json:"asks"`
 	LastUpdated  time.Time         `json:"last_updated"`
-	AssetType    string
+	AssetType    assets.AssetType
 }
 
 // Orderbook holds the orderbook information for a currency pair and type
 type Orderbook struct {
-	Orderbook    map[pair.CurrencyItem]map[pair.CurrencyItem]map[string]Base
+	Orderbook    map[pair.CurrencyItem]map[pair.CurrencyItem]map[assets.AssetType]Base
 	ExchangeName string
 }
 
@@ -79,7 +80,7 @@ func (o *Base) Update(Bids, Asks []Item) {
 
 // GetOrderbook checks and returns the orderbook given an exchange name and
 // currency pair if it exists
-func GetOrderbook(exchange string, p pair.CurrencyPair, orderbookType string) (Base, error) {
+func GetOrderbook(exchange string, p pair.CurrencyPair, orderbookType assets.AssetType) (Base, error) {
 	orderbook, err := GetOrderbookByExchange(exchange)
 	if err != nil {
 		return Base{}, err
@@ -141,14 +142,14 @@ func SecondCurrencyExists(exchange string, p pair.CurrencyPair) bool {
 }
 
 // CreateNewOrderbook creates a new orderbook
-func CreateNewOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew Base, orderbookType string) Orderbook {
+func CreateNewOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew Base, orderbookType assets.AssetType) Orderbook {
 	m.Lock()
 	defer m.Unlock()
 	orderbook := Orderbook{}
 	orderbook.ExchangeName = exchangeName
-	orderbook.Orderbook = make(map[pair.CurrencyItem]map[pair.CurrencyItem]map[string]Base)
-	a := make(map[pair.CurrencyItem]map[string]Base)
-	b := make(map[string]Base)
+	orderbook.Orderbook = make(map[pair.CurrencyItem]map[pair.CurrencyItem]map[assets.AssetType]Base)
+	a := make(map[pair.CurrencyItem]map[assets.AssetType]Base)
+	b := make(map[assets.AssetType]Base)
 	b[orderbookType] = orderbookNew
 	a[p.SecondCurrency] = b
 	orderbook.Orderbook[p.FirstCurrency] = a
@@ -158,7 +159,7 @@ func CreateNewOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew B
 
 // ProcessOrderbook processes incoming orderbooks, creating or updating the
 // Orderbook list
-func ProcessOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew Base, orderbookType string) {
+func ProcessOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew Base, orderbookType assets.AssetType) {
 	if orderbookNew.Pair.Pair() == "" {
 		// set Pair if not set
 		orderbookNew.Pair = p
@@ -174,7 +175,7 @@ func ProcessOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew Bas
 
 	if FirstCurrencyExists(exchangeName, p.FirstCurrency) {
 		m.Lock()
-		a := make(map[string]Base)
+		a := make(map[assets.AssetType]Base)
 		a[orderbookType] = orderbookNew
 		orderbook.Orderbook[p.FirstCurrency][p.SecondCurrency] = a
 		m.Unlock()
@@ -182,8 +183,8 @@ func ProcessOrderbook(exchangeName string, p pair.CurrencyPair, orderbookNew Bas
 	}
 
 	m.Lock()
-	a := make(map[pair.CurrencyItem]map[string]Base)
-	b := make(map[string]Base)
+	a := make(map[pair.CurrencyItem]map[assets.AssetType]Base)
+	b := make(map[assets.AssetType]Base)
 	b[orderbookType] = orderbookNew
 	a[p.SecondCurrency] = b
 	orderbook.Orderbook[p.FirstCurrency] = a

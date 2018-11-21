@@ -9,14 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/thrasher-/gocryptotrader/common"
-	"github.com/thrasher-/gocryptotrader/config"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
-	"github.com/thrasher-/gocryptotrader/exchanges/request"
-	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
@@ -93,90 +89,29 @@ type OKEX struct {
 
 	// Stores for corresponding variable checks
 	ContractTypes    []string
-	CurrencyPairs    []string
 	ContractPosition []string
 	Types            []string
 }
 
-// SetDefaults method assignes the default values for Bittrex
-func (o *OKEX) SetDefaults() {
-	o.SetErrorDefaults()
-	o.SetCheckVarDefaults()
-	o.Name = "OKEX"
-	o.Enabled = false
-	o.Verbose = false
-	o.RESTPollingDelay = 10
-	o.APIWithdrawPermissions = exchange.AutoWithdrawCrypto | exchange.NoFiatWithdrawals
-	o.RequestCurrencyPairFormat.Delimiter = "_"
-	o.RequestCurrencyPairFormat.Uppercase = false
-	o.ConfigCurrencyPairFormat.Delimiter = "_"
-	o.ConfigCurrencyPairFormat.Uppercase = true
-	o.SupportsAutoPairUpdating = true
-	o.SupportsRESTTickerBatching = false
-	o.SupportsRESTAPI = true
-	o.SupportsWebsocketAPI = true
-	o.Requester = request.New(o.Name,
-		request.NewRateLimit(time.Second, okexAuthRate),
-		request.NewRateLimit(time.Second, okexUnauthRate),
-		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout))
-	o.APIUrlDefault = apiURL
-	o.APIUrl = o.APIUrlDefault
-	o.AssetTypes = []string{ticker.Spot}
-	o.WebsocketInit()
-}
+// GetFuturesInstruments returns a list of tradable spot instruments and their properties
+func (o *OKEX) GetFuturesInstruments() ([]FuturesInstrument, error) {
+	var resp []FuturesInstrument
 
-// Setup method sets current configuration details if enabled
-func (o *OKEX) Setup(exch config.ExchangeConfig) {
-	if !exch.Enabled {
-		o.SetEnabled(false)
-	} else {
-		o.Enabled = true
-		o.AuthenticatedAPISupport = exch.AuthenticatedAPISupport
-		o.SetAPIKeys(exch.APIKey, exch.APISecret, exch.ClientID, false)
-		o.SetHTTPClientTimeout(exch.HTTPTimeout)
-		o.SetHTTPClientUserAgent(exch.HTTPUserAgent)
-		o.RESTPollingDelay = exch.RESTPollingDelay
-		o.Verbose = exch.Verbose
-		o.Websocket.SetEnabled(exch.Websocket)
-		o.BaseCurrencies = common.SplitStrings(exch.BaseCurrencies, ",")
-		o.AvailablePairs = common.SplitStrings(exch.AvailablePairs, ",")
-		o.EnabledPairs = common.SplitStrings(exch.EnabledPairs, ",")
-		err := o.SetCurrencyPairFormat()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = o.SetAssetTypes()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = o.SetAutoPairDefaults()
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = o.SetAPIURL(exch)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = o.SetClientProxyAddress(exch.ProxyAddress)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = o.WebsocketSetup(o.WsConnect,
-			exch.Name,
-			exch.Websocket,
-			okexDefaultWebsocketURL,
-			exch.WebsocketURL)
-		if err != nil {
-			log.Fatal(err)
-		}
+	path := fmt.Sprintf("%sfutures/v3/%s", o.API.Endpoints.URL, instruments)
+	err := o.SendHTTPRequest(path, &resp)
+
+	if err != nil {
+		return nil, err
 	}
+
+	return resp, nil
 }
 
 // GetSpotInstruments returns a list of tradable spot instruments and their properties
 func (o *OKEX) GetSpotInstruments() ([]SpotInstrument, error) {
 	var resp []SpotInstrument
 
-	path := fmt.Sprintf("%sspot/v3/%s", o.APIUrl, instruments)
+	path := fmt.Sprintf("%sspot/v3/%s", o.API.Endpoints.URL, instruments)
 	err := o.SendHTTPRequest(path, &resp)
 
 	if err != nil {
@@ -196,15 +131,12 @@ func (o *OKEX) GetContractPrice(symbol, contractType string) (ContractPrice, err
 	if err := o.CheckContractType(contractType); err != nil {
 		return resp, err
 	}
-	if err := o.CheckSymbol(symbol); err != nil {
-		return resp, err
-	}
 
 	values := url.Values{}
 	values.Set("symbol", common.StringToLower(symbol))
 	values.Set("contract_type", common.StringToLower(contractType))
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractPrice, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractPrice, values.Encode())
 
 	err := o.SendHTTPRequest(path, &resp)
 	if err != nil {
@@ -230,15 +162,12 @@ func (o *OKEX) GetContractMarketDepth(symbol, contractType string) (ActualContra
 	if err := o.CheckContractType(contractType); err != nil {
 		return fullDepth, err
 	}
-	if err := o.CheckSymbol(symbol); err != nil {
-		return fullDepth, err
-	}
 
 	values := url.Values{}
 	values.Set("symbol", common.StringToLower(symbol))
 	values.Set("contract_type", common.StringToLower(contractType))
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractFutureDepth, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractFutureDepth, values.Encode())
 
 	err := o.SendHTTPRequest(path, &resp)
 	if err != nil {
@@ -294,15 +223,12 @@ func (o *OKEX) GetContractTradeHistory(symbol, contractType string) ([]ActualCon
 	if err := o.CheckContractType(contractType); err != nil {
 		return actualTradeHistory, err
 	}
-	if err := o.CheckSymbol(symbol); err != nil {
-		return actualTradeHistory, err
-	}
 
 	values := url.Values{}
 	values.Set("symbol", common.StringToLower(symbol))
 	values.Set("contract_type", common.StringToLower(contractType))
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractTradeHistory, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractTradeHistory, values.Encode())
 
 	err := o.SendHTTPRequest(path, &resp)
 	if err != nil {
@@ -332,13 +258,9 @@ func (o *OKEX) GetContractTradeHistory(symbol, contractType string) ([]ActualCon
 //
 // symbol e.g. btc_usd
 func (o *OKEX) GetContractIndexPrice(symbol string) (float64, error) {
-	if err := o.CheckSymbol(symbol); err != nil {
-		return 0, err
-	}
-
 	values := url.Values{}
 	values.Set("symbol", common.StringToLower(symbol))
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractFutureIndex, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractFutureIndex, values.Encode())
 	var resp interface{}
 
 	err := o.SendHTTPRequest(path, &resp)
@@ -361,7 +283,7 @@ func (o *OKEX) GetContractIndexPrice(symbol string) (float64, error) {
 // pair
 // USD-CNY exchange rate used by OKEX, updated weekly
 func (o *OKEX) GetContractExchangeRate() (float64, error) {
-	path := fmt.Sprintf("%s%s%s.do?", o.APIUrl, apiVersion, contractExchangeRate)
+	path := fmt.Sprintf("%s%s%s.do?", o.API.Endpoints.URL, apiVersion, contractExchangeRate)
 	var resp interface{}
 
 	if err := o.SendHTTPRequest(path, &resp); err != nil {
@@ -383,13 +305,9 @@ func (o *OKEX) GetContractExchangeRate() (float64, error) {
 //
 // symbol e.g btc_usd
 func (o *OKEX) GetContractFutureEstimatedPrice(symbol string) (float64, error) {
-	if err := o.CheckSymbol(symbol); err != nil {
-		return 0, err
-	}
-
 	values := url.Values{}
 	values.Set("symbol", symbol)
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractFutureIndex, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractFutureIndex, values.Encode())
 	var resp interface{}
 
 	if err := o.SendHTTPRequest(path, &resp); err != nil {
@@ -416,9 +334,6 @@ func (o *OKEX) GetContractFutureEstimatedPrice(symbol string) (float64, error) {
 // since: timestamp(eg:1417536000000). data after the timestamp will be returned
 func (o *OKEX) GetContractCandlestickData(symbol, typeInput, contractType string, size, since int) ([]CandleStickData, error) {
 	var candleData []CandleStickData
-	if err := o.CheckSymbol(symbol); err != nil {
-		return candleData, err
-	}
 	if err := o.CheckContractType(contractType); err != nil {
 		return candleData, err
 	}
@@ -433,7 +348,7 @@ func (o *OKEX) GetContractCandlestickData(symbol, typeInput, contractType string
 	values.Set("size", strconv.FormatInt(int64(size), 10))
 	values.Set("since", strconv.FormatInt(int64(since), 10))
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractCandleStick, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractCandleStick, values.Encode())
 	var resp interface{}
 
 	if err := o.SendHTTPRequest(path, &resp); err != nil {
@@ -476,9 +391,6 @@ func (o *OKEX) GetContractCandlestickData(symbol, typeInput, contractType string
 
 // GetContractHoldingsNumber returns current number of holdings
 func (o *OKEX) GetContractHoldingsNumber(symbol, contractType string) (number float64, contract string, err error) {
-	if err = o.CheckSymbol(symbol); err != nil {
-		return number, contract, err
-	}
 	if err = o.CheckContractType(contractType); err != nil {
 		return number, contract, err
 	}
@@ -487,7 +399,7 @@ func (o *OKEX) GetContractHoldingsNumber(symbol, contractType string) (number fl
 	values.Set("symbol", symbol)
 	values.Set("contract_type", contractType)
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractFutureHoldAmount, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractFutureHoldAmount, values.Encode())
 	var resp interface{}
 
 	if err = o.SendHTTPRequest(path, &resp); err != nil {
@@ -512,9 +424,6 @@ func (o *OKEX) GetContractHoldingsNumber(symbol, contractType string) (number fl
 // GetContractlimit returns upper and lower price limit
 func (o *OKEX) GetContractlimit(symbol, contractType string) (map[string]float64, error) {
 	contractLimits := make(map[string]float64)
-	if err := o.CheckSymbol(symbol); err != nil {
-		return contractLimits, err
-	}
 	if err := o.CheckContractType(contractType); err != nil {
 		return contractLimits, err
 	}
@@ -523,7 +432,7 @@ func (o *OKEX) GetContractlimit(symbol, contractType string) (map[string]float64
 	values.Set("symbol", symbol)
 	values.Set("contract_type", contractType)
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, contractFutureLimits, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, contractFutureLimits, values.Encode())
 	var resp interface{}
 
 	if err := o.SendHTTPRequest(path, &resp); err != nil {
@@ -558,10 +467,6 @@ func (o *OKEX) GetContractUserInfo() error {
 // GetContractPosition returns User Contract Positions （Cross-Margin Mode）
 func (o *OKEX) GetContractPosition(symbol, contractType string) error {
 	var resp interface{}
-
-	if err := o.CheckSymbol(symbol); err != nil {
-		return err
-	}
 	if err := o.CheckContractType(contractType); err != nil {
 		return err
 	}
@@ -585,9 +490,6 @@ func (o *OKEX) GetContractPosition(symbol, contractType string) error {
 func (o *OKEX) PlaceContractOrders(symbol, contractType, position string, leverageRate int, price, amount float64, matchPrice bool) (float64, error) {
 	var resp interface{}
 
-	if err := o.CheckSymbol(symbol); err != nil {
-		return 0, err
-	}
 	if err := o.CheckContractType(contractType); err != nil {
 		return 0, err
 	}
@@ -631,10 +533,6 @@ func (o *OKEX) PlaceContractOrders(symbol, contractType, position string, levera
 // GetContractFuturesTradeHistory returns OKEX Contract Trade History (Not for Personal)
 func (o *OKEX) GetContractFuturesTradeHistory(symbol, date string, since int) error {
 	var resp interface{}
-
-	if err := o.CheckSymbol(symbol); err != nil {
-		return err
-	}
 
 	values := url.Values{}
 	values.Set("symbol", symbol)
@@ -746,7 +644,7 @@ func (o *OKEX) GetSpotTicker(symbol string) (SpotPrice, error) {
 
 	values := url.Values{}
 	values.Set("symbol", symbol)
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, "ticker", values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, "ticker", values.Encode())
 
 	err := o.SendHTTPRequest(path, &resp)
 	if err != nil {
@@ -768,7 +666,7 @@ func (o *OKEX) GetSpotMarketDepth(asd ActualSpotDepthRequestParams) (ActualSpotD
 	values.Set("symbol", asd.Symbol)
 	values.Set("size", fmt.Sprintf("%d", asd.Size))
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, "depth", values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, "depth", values.Encode())
 
 	err := o.SendHTTPRequest(path, &resp)
 	if err != nil {
@@ -825,7 +723,7 @@ func (o *OKEX) GetSpotRecentTrades(ast ActualSpotTradeHistoryRequestParams) ([]A
 	values.Set("symbol", ast.Symbol)
 	values.Set("since", fmt.Sprintf("%d", ast.Since))
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, "trades", values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, "trades", values.Encode())
 
 	err := o.SendHTTPRequest(path, &resp)
 	if err != nil {
@@ -865,7 +763,7 @@ func (o *OKEX) GetSpotKline(arg KlinesRequestParams) ([]CandleStickData, error) 
 		values.Set("since", strconv.FormatInt(int64(arg.Since), 10))
 	}
 
-	path := fmt.Sprintf("%s%s%s.do?%s", o.APIUrl, apiVersion, spotKline, values.Encode())
+	path := fmt.Sprintf("%s%s%s.do?%s", o.API.Endpoints.URL, apiVersion, spotKline, values.Encode())
 	var resp interface{}
 
 	if err := o.SendHTTPRequest(path, &resp); err != nil {
@@ -934,16 +832,16 @@ func (o *OKEX) SendHTTPRequest(path string, result interface{}) error {
 // SendAuthenticatedHTTPRequest sends an authenticated http request to a desired
 // path
 func (o *OKEX) SendAuthenticatedHTTPRequest(method string, values url.Values, result interface{}) (err error) {
-	if !o.AuthenticatedAPISupport {
+	if !o.AllowAuthenticatedRequest() {
 		return fmt.Errorf(exchange.WarningAuthenticatedRequestWithoutCredentialsSet, o.Name)
 	}
 
-	values.Set("api_key", o.APIKey)
-	hasher := common.GetMD5([]byte(values.Encode() + "&secret_key=" + o.APISecret))
+	values.Set("api_key", o.API.Credentials.Key)
+	hasher := common.GetMD5([]byte(values.Encode() + "&secret_key=" + o.API.Credentials.Secret))
 	values.Set("sign", strings.ToUpper(common.HexEncodeToString(hasher)))
 
 	encoded := values.Encode()
-	path := o.APIUrl + apiVersion + method
+	path := o.API.Endpoints.URL + apiVersion + method
 
 	if o.Verbose {
 		log.Debugf("Sending POST request to %s with params %s\n", path, encoded)
@@ -1124,7 +1022,6 @@ func (o *OKEX) SetErrorDefaults() {
 // to check on this, this end.
 func (o *OKEX) SetCheckVarDefaults() {
 	o.ContractTypes = []string{"this_week", "next_week", "quarter"}
-	o.CurrencyPairs = []string{"btc_usd", "ltc_usd", "eth_usd", "etc_usd", "bch_usd"}
 	o.Types = []string{"1min", "3min", "5min", "15min", "30min", "1day", "3day",
 		"1week", "1hour", "2hour", "4hour", "6hour", "12hour"}
 	o.ContractPosition = []string{"1", "2", "3", "4"}
@@ -1134,14 +1031,6 @@ func (o *OKEX) SetCheckVarDefaults() {
 func (o *OKEX) CheckContractPosition(position string) error {
 	if !common.StringDataCompare(o.ContractPosition, position) {
 		return errors.New("invalid position string - e.g. 1 = open long position, 2 = open short position, 3 = liquidate long position, 4 = liquidate short position")
-	}
-	return nil
-}
-
-// CheckSymbol checks to see if the string is a valid symbol for okex
-func (o *OKEX) CheckSymbol(symbol string) error {
-	if !common.StringDataCompare(o.CurrencyPairs, symbol) {
-		return errors.New("invalid symbol string")
 	}
 	return nil
 }

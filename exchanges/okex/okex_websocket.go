@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
+
 	"github.com/gorilla/websocket"
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
@@ -73,7 +75,7 @@ func (o *OKEX) WsConnect() error {
 func (o *OKEX) WsSubscribe() error {
 	myEnabledSubscriptionChannels := []string{}
 
-	for _, pair := range o.EnabledPairs {
+	for _, pair := range o.CurrencyPairs.Spot.Enabled {
 
 		// ----------- deprecate when usd pairs are upgraded to usdt ----------
 		checkSymbol := common.SplitStrings(pair, "_")
@@ -222,11 +224,11 @@ func (o *OKEX) WsHandleData() {
 				}
 
 				var newPair string
-				var assetType string
+				var assetType assets.AssetType
 				currencyPairSlice := common.SplitStrings(multiStreamData.Channel, "_")
 				if len(currencyPairSlice) > 5 {
 					newPair = currencyPairSlice[3] + "_" + currencyPairSlice[4]
-					assetType = currencyPairSlice[2]
+					assetType = assets.AssetType(currencyPairSlice[2])
 				}
 
 				if strings.Contains(multiStreamData.Channel, "ticker") {

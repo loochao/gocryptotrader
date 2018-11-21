@@ -7,6 +7,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	"github.com/thrasher-/gocryptotrader/exchanges"
+	"github.com/thrasher-/gocryptotrader/exchanges/assets"
 
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
@@ -33,9 +34,9 @@ func TestSetup(t *testing.T) {
 		t.Error("Test Failed - bitflyer Setup() init error")
 	}
 
-	bitflyerConfig.AuthenticatedAPISupport = true
-	bitflyerConfig.APIKey = testAPIKey
-	bitflyerConfig.APISecret = testAPISecret
+	bitflyerConfig.API.AuthenticatedSupport = true
+	bitflyerConfig.API.Credentials.Key = testAPIKey
+	bitflyerConfig.API.Credentials.Secret = testAPISecret
 
 	b.Setup(bitflyerConfig)
 }
@@ -136,7 +137,7 @@ func TestFetchTicker(t *testing.T) {
 	t.Parallel()
 	var p pair.CurrencyPair
 
-	currencies := b.GetAvailableCurrencies()
+	currencies := b.GetAvailablePairs(assets.AssetTypeSpot)
 	for _, pair := range currencies {
 		if pair.Pair().String() == "FXBTC_JPY" {
 			p = pair
@@ -144,7 +145,7 @@ func TestFetchTicker(t *testing.T) {
 		}
 	}
 
-	_, err := b.FetchTicker(p, b.AssetTypes[0])
+	_, err := b.FetchTicker(p, assets.AssetTypeSpot)
 	if err != nil {
 		t.Error("test failed - Bitflyer - FetchTicker() error", err)
 	}
@@ -252,11 +253,7 @@ func TestFormatWithdrawPermissions(t *testing.T) {
 // Any tests below this line have the ability to impact your orders on the exchange. Enable canManipulateRealOrders to run them
 // ----------------------------------------------------------------------------------------------------------------------------
 func areTestAPIKeysSet() bool {
-	if b.APIKey != "" && b.APIKey != "Key" &&
-		b.APISecret != "" && b.APISecret != "Secret" {
-		return true
-	}
-	return false
+	return b.ValidateAPICredentials()
 }
 
 func TestSubmitOrder(t *testing.T) {
@@ -272,6 +269,7 @@ func TestSubmitOrder(t *testing.T) {
 		FirstCurrency:  symbol.LTC,
 		SecondCurrency: symbol.BTC,
 	}
+
 	_, err := b.SubmitOrder(p, exchange.Buy, exchange.Market, 1, 1, "clientId")
 	if err != common.ErrNotYetImplemented {
 		t.Errorf("Expected 'Not Yet Implemented', recieved %v", err)
