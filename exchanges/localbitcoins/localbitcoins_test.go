@@ -1,8 +1,10 @@
 package localbitcoins
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
@@ -11,11 +13,8 @@ import (
 
 var l LocalBitcoins
 
-// Please supply your own APIKEYS here for due diligence testing
-
+// Set API data in "../../testdata/apikeys.json"
 const (
-	apiKey                  = ""
-	apiSecret               = ""
 	canManipulateRealOrders = false
 )
 
@@ -26,16 +25,30 @@ func TestSetDefaults(t *testing.T) {
 func TestSetup(t *testing.T) {
 	cfg := config.GetConfig()
 	cfg.LoadConfig("../../testdata/configtest.json")
-	localbitcoinsConfig, err := cfg.GetExchangeConfig("LocalBitcoins")
+	exchangeConfig, err := cfg.GetExchangeConfig("LocalBitcoins")
 	if err != nil {
 		t.Error("Test Failed - LakeBTC Setup() init error")
 	}
 
-	localbitcoinsConfig.AuthenticatedAPISupport = true
-	localbitcoinsConfig.APIKey = apiKey
-	localbitcoinsConfig.APISecret = apiSecret
+	exchangeConfig.AuthenticatedAPISupport = true
+	apiKeyFile, err := common.ReadFile("../../testdata/apikeys.json")
+	if err != nil {
+		t.Error(err)
+	}
+	var exchangesAPIKeys []config.ExchangeConfig
+	err = json.Unmarshal(apiKeyFile, &exchangesAPIKeys)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, exchangeAPIKeys := range exchangesAPIKeys {
+		if exchangeAPIKeys.Name == exchangeConfig.Name {
+			exchangeConfig.APIKey = exchangeAPIKeys.APIKey
+			exchangeConfig.APISecret = exchangeAPIKeys.APISecret
+			exchangeConfig.Verbose = exchangeAPIKeys.Verbose
+		}
+	}
 
-	l.Setup(localbitcoinsConfig)
+	l.Setup(exchangeConfig)
 }
 
 func TestGetTicker(t *testing.T) {

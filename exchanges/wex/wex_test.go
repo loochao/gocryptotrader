@@ -1,8 +1,10 @@
 package wex
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
@@ -11,10 +13,8 @@ import (
 
 var w WEX
 
-// Please supply your own keys for better unit testing
+// Set API data in "../../testdata/apikeys.json"
 const (
-	apiKey                  = ""
-	apiSecret               = ""
 	canManipulateRealOrders = false
 	isWexEncounteringIssues = true
 )
@@ -26,15 +26,30 @@ func TestSetDefaults(t *testing.T) {
 func TestSetup(t *testing.T) {
 	wexConfig := config.GetConfig()
 	wexConfig.LoadConfig("../../testdata/configtest.json")
-	conf, err := wexConfig.GetExchangeConfig("WEX")
+	exchangeConfig, err := wexConfig.GetExchangeConfig("WEX")
 	if err != nil {
 		t.Error("Test Failed - WEX init error")
 	}
-	conf.APIKey = apiKey
-	conf.APISecret = apiSecret
-	conf.AuthenticatedAPISupport = true
 
-	w.Setup(conf)
+	exchangeConfig.AuthenticatedAPISupport = true
+	apiKeyFile, err := common.ReadFile("../../testdata/apikeys.json")
+	if err != nil {
+		t.Error(err)
+	}
+	var exchangesAPIKeys []config.ExchangeConfig
+	err = json.Unmarshal(apiKeyFile, &exchangesAPIKeys)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, exchangeAPIKeys := range exchangesAPIKeys {
+		if exchangeAPIKeys.Name == exchangeConfig.Name {
+			exchangeConfig.APIKey = exchangeAPIKeys.APIKey
+			exchangeConfig.APISecret = exchangeAPIKeys.APISecret
+			exchangeConfig.Verbose = exchangeAPIKeys.Verbose
+		}
+	}
+
+	w.Setup(exchangeConfig)
 }
 
 func TestGetTradablePairs(t *testing.T) {

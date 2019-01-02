@@ -1,19 +1,18 @@
 package gateio
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
 )
 
-// Please supply your own APIKEYS here for due diligence testing
-
+// Set API data in "../../testdata/apikeys.json"
 const (
-	apiKey                  = ""
-	apiSecret               = ""
 	canManipulateRealOrders = false
 )
 
@@ -26,16 +25,30 @@ func TestSetDefaults(t *testing.T) {
 func TestSetup(t *testing.T) {
 	cfg := config.GetConfig()
 	cfg.LoadConfig("../../testdata/configtest.json")
-	gateioConfig, err := cfg.GetExchangeConfig("GateIO")
+	exchangeConfig, err := cfg.GetExchangeConfig("GateIO")
 	if err != nil {
 		t.Error("Test Failed - GateIO Setup() init error")
 	}
 
-	gateioConfig.AuthenticatedAPISupport = true
-	gateioConfig.APIKey = apiKey
-	gateioConfig.APISecret = apiSecret
+	exchangeConfig.AuthenticatedAPISupport = true
+	apiKeyFile, err := common.ReadFile("../../testdata/apikeys.json")
+	if err != nil {
+		t.Error(err)
+	}
+	var exchangesAPIKeys []config.ExchangeConfig
+	err = json.Unmarshal(apiKeyFile, &exchangesAPIKeys)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, exchangeAPIKeys := range exchangesAPIKeys {
+		if exchangeAPIKeys.Name == exchangeConfig.Name {
+			exchangeConfig.APIKey = exchangeAPIKeys.APIKey
+			exchangeConfig.APISecret = exchangeAPIKeys.APISecret
+			exchangeConfig.Verbose = exchangeAPIKeys.Verbose
+		}
+	}
 
-	g.Setup(gateioConfig)
+	g.Setup(exchangeConfig)
 }
 
 func TestGetSymbols(t *testing.T) {
@@ -57,7 +70,7 @@ func TestGetMarketInfo(t *testing.T) {
 func TestSpotNewOrder(t *testing.T) {
 	t.Parallel()
 
-	if apiKey == "" || apiSecret == "" {
+	if g.APIKey == "" || g.APISecret == "" {
 		t.Skip()
 	}
 
@@ -75,7 +88,7 @@ func TestSpotNewOrder(t *testing.T) {
 func TestCancelExistingOrder(t *testing.T) {
 	t.Parallel()
 
-	if apiKey == "" || apiSecret == "" {
+	if g.APIKey == "" || g.APISecret == "" {
 		t.Skip()
 	}
 
@@ -88,7 +101,7 @@ func TestCancelExistingOrder(t *testing.T) {
 func TestGetBalances(t *testing.T) {
 	t.Parallel()
 
-	if apiKey == "" || apiSecret == "" {
+	if g.APIKey == "" || g.APISecret == "" {
 		t.Skip()
 	}
 
@@ -163,7 +176,7 @@ func TestGetFee(t *testing.T) {
 	TestSetup(t)
 
 	var feeBuilder = setFeeBuilder()
-	if apiKey != "" && apiSecret != "" {
+	if g.APIKey != "" && g.APISecret != "" {
 		// CryptocurrencyTradeFee Basic
 		if resp, err := g.GetFee(feeBuilder); resp != float64(0.002) || err != nil {
 			t.Error(err)
@@ -346,7 +359,7 @@ func TestCancelAllExchangeOrders(t *testing.T) {
 }
 
 func TestGetAccountInfo(t *testing.T) {
-	if apiSecret == "" || apiKey == "" {
+	if g.APISecret == "" || g.APIKey == "" {
 		_, err := g.GetAccountInfo()
 		if err == nil {
 			t.Error("Test Failed - GetAccountInfo() error")

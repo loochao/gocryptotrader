@@ -1,8 +1,10 @@
 package poloniex
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/config"
 	"github.com/thrasher-/gocryptotrader/currency/pair"
 	"github.com/thrasher-/gocryptotrader/currency/symbol"
@@ -11,11 +13,8 @@ import (
 
 var p Poloniex
 
-// Please supply your own APIKEYS here for due diligence testing
-
+// Set API data in "../../testdata/apikeys.json"
 const (
-	apiKey                  = ""
-	apiSecret               = ""
 	canManipulateRealOrders = false
 )
 
@@ -26,16 +25,30 @@ func TestSetDefaults(t *testing.T) {
 func TestSetup(t *testing.T) {
 	cfg := config.GetConfig()
 	cfg.LoadConfig("../../testdata/configtest.json")
-	poloniexConfig, err := cfg.GetExchangeConfig("Poloniex")
+	exchangeConfig, err := cfg.GetExchangeConfig("Poloniex")
 	if err != nil {
 		t.Error("Test Failed - Poloniex Setup() init error")
 	}
 
-	poloniexConfig.AuthenticatedAPISupport = true
-	poloniexConfig.APIKey = apiKey
-	poloniexConfig.APISecret = apiSecret
+	exchangeConfig.AuthenticatedAPISupport = true
+	apiKeyFile, err := common.ReadFile("../../testdata/apikeys.json")
+	if err != nil {
+		t.Error(err)
+	}
+	var exchangesAPIKeys []config.ExchangeConfig
+	err = json.Unmarshal(apiKeyFile, &exchangesAPIKeys)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, exchangeAPIKeys := range exchangesAPIKeys {
+		if exchangeAPIKeys.Name == exchangeConfig.Name {
+			exchangeConfig.APIKey = exchangeAPIKeys.APIKey
+			exchangeConfig.APISecret = exchangeAPIKeys.APISecret
+			exchangeConfig.Verbose = exchangeAPIKeys.Verbose
+		}
+	}
 
-	p.Setup(poloniexConfig)
+	p.Setup(exchangeConfig)
 }
 
 func TestGetTicker(t *testing.T) {
@@ -106,7 +119,7 @@ func TestGetFee(t *testing.T) {
 	TestSetup(t)
 	var feeBuilder = setFeeBuilder()
 
-	if apiKey != "" && apiSecret != "" {
+	if p.APIKey != "" && p.APISecret != "" {
 		// CryptocurrencyTradeFee Basic
 		if resp, err := p.GetFee(feeBuilder); resp != float64(0.002) || err != nil {
 			t.Error(err)
