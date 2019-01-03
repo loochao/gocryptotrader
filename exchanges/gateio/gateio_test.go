@@ -72,7 +72,7 @@ func TestGetMarketInfo(t *testing.T) {
 func TestSpotNewOrder(t *testing.T) {
 	t.Parallel()
 
-	if g.APIKey == "" || g.APISecret == "" || g.APIKey == "Key" || g.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 
@@ -90,7 +90,7 @@ func TestSpotNewOrder(t *testing.T) {
 func TestCancelExistingOrder(t *testing.T) {
 	t.Parallel()
 
-	if g.APIKey == "" || g.APISecret == "" || g.APIKey == "Key" || g.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 
@@ -103,7 +103,7 @@ func TestCancelExistingOrder(t *testing.T) {
 func TestGetBalances(t *testing.T) {
 	t.Parallel()
 
-	if g.APIKey == "" || g.APISecret == "" || g.APIKey == "Key" || g.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 
@@ -178,7 +178,7 @@ func TestGetFee(t *testing.T) {
 	TestSetup(t)
 
 	var feeBuilder = setFeeBuilder()
-	if g.APIKey != "" && g.APISecret != "" || g.APIKey != "Key" || g.APISecret != "Secret" {
+	if areTestAPIKeysSet() {
 		// CryptocurrencyTradeFee Basic
 		if resp, err := g.GetFee(feeBuilder); resp != float64(0.002) || err != nil {
 			t.Error(err)
@@ -361,7 +361,7 @@ func TestCancelAllExchangeOrders(t *testing.T) {
 }
 
 func TestGetAccountInfo(t *testing.T) {
-	if g.APISecret == "" || g.APIKey == "" || g.APIKey == "Key" || g.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		_, err := g.GetAccountInfo()
 		if err == nil {
 			t.Error("Test Failed - GetAccountInfo() error")

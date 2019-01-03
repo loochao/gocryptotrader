@@ -266,8 +266,7 @@ func TestGetOpenOrders(t *testing.T) {
 
 func TestGetOrderStatus(t *testing.T) {
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 	_, err := b.GetOrderStatus(1337)
@@ -296,8 +295,7 @@ func TestCancelAllExistingOrders(t *testing.T) {
 
 func TestPlaceOrder(t *testing.T) {
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 	_, err := b.PlaceOrder("btcusd", 0.01, 1, true, true)
@@ -321,8 +319,7 @@ func TestGetWithdrawalRequests(t *testing.T) {
 
 func TestCryptoWithdrawal(t *testing.T) {
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 
@@ -353,8 +350,7 @@ func TestGetUnconfirmedBitcoinDeposits(t *testing.T) {
 func TestTransferAccountBalance(t *testing.T) {
 
 	t.Parallel()
-	if b.APIKey == "" || b.APISecret == "" ||
-		b.APIKey == "Key" || b.APISecret == "Secret" {
+	if !areTestAPIKeysSet() {
 		t.Skip()
 	}
 	_, err := b.TransferAccountBalance(1, "", "", true)
