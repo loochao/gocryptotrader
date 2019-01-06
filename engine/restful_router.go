@@ -2,12 +2,12 @@ package engine
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/thrasher-/gocryptotrader/common"
+	log "github.com/thrasher-/gocryptotrader/logger"
 )
 
 // RESTLogger logs the requests internally
@@ -16,7 +16,7 @@ func RESTLogger(inner http.Handler, name string) http.Handler {
 		start := time.Now()
 		inner.ServeHTTP(w, r)
 
-		log.Printf(
+		log.Debugf(
 			"%s\t%s\t%s\t%s",
 			r.Method,
 			r.RequestURI,
@@ -28,8 +28,8 @@ func RESTLogger(inner http.Handler, name string) http.Handler {
 
 // StartRESTServer starts a REST server
 func StartRESTServer() {
-	listenAddr := Bot.Config.RESTServer.ListenAddress
-	log.Printf("HTTP REST server support enabled. Listen URL: http://%s:%d\n", common.ExtractHost(listenAddr), common.ExtractPort(listenAddr))
+	listenAddr := Bot.Config.RemoteControl.DeprecatedRPC.ListenAddress
+	log.Debugf("Deprecated RPC server support enabled. Listen URL: http://%s:%d\n", common.ExtractHost(listenAddr), common.ExtractPort(listenAddr))
 	err := http.ListenAndServe(listenAddr, NewRouter(true))
 	if err != nil {
 		log.Fatal(err)
@@ -38,8 +38,8 @@ func StartRESTServer() {
 
 // StartWebsocketServer starts a Websocket server
 func StartWebsocketServer() {
-	listenAddr := Bot.Config.WebsocketServer.ListenAddress
-	log.Printf("Websocket server support enabled. Listen URL: ws://%s:%d/ws\n", common.ExtractHost(listenAddr), common.ExtractPort(listenAddr))
+	listenAddr := Bot.Config.RemoteControl.WebsocketRPC.ListenAddress
+	log.Debugf("Websocket RPC support enabled. Listen URL: ws://%s:%d/ws\n", common.ExtractHost(listenAddr), common.ExtractPort(listenAddr))
 	err := http.ListenAndServe(listenAddr, NewRouter(false))
 	if err != nil {
 		log.Fatal(err)
@@ -51,7 +51,7 @@ func StartWebsocketServer() {
 func NewRouter(isREST bool) *mux.Router {
 	router := mux.NewRouter().StrictSlash(true)
 	var routes []Route
-	listenAddr := Bot.Config.RESTServer.ListenAddress
+	listenAddr := Bot.Config.RemoteControl.DeprecatedRPC.ListenAddress
 
 	if isREST {
 		routes = []Route{
@@ -60,13 +60,11 @@ func NewRouter(isREST bool) *mux.Router {
 			Route{"SaveAllSettings", "POST", "/config/all/save", RESTSaveAllSettings},
 			Route{"AllEnabledAccountInfo", "GET", "/exchanges/enabled/accounts/all", RESTGetAllEnabledAccountInfo},
 			Route{"AllActiveExchangesAndCurrencies", "GET", "/exchanges/enabled/latest/all", RESTGetAllActiveTickers},
-			Route{"IndividualExchangeAndCurrency", "GET", "/exchanges/{exchangeName}/latest/{currency}", RESTGetTicker},
 			Route{"GetPortfolio", "GET", "/portfolio/all", RESTGetPortfolio},
 			Route{"AllActiveExchangesAndOrderbooks", "GET", "/exchanges/orderbook/latest/all", RESTGetAllActiveOrderbooks},
-			Route{"IndividualExchangeOrderbook", "GET", "/exchanges/{exchangeName}/orderbook/latest/{currency}", RESTGetOrderbook},
 		}
 	} else {
-		listenAddr = Bot.Config.WebsocketServer.ListenAddress
+		listenAddr = Bot.Config.RemoteControl.WebsocketRPC.ListenAddress
 		routes = []Route{
 			Route{"ws", "GET", "/ws", WebsocketClientHandler},
 		}

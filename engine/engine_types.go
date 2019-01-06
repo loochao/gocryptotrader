@@ -14,8 +14,10 @@ type Settings struct {
 	EnableAllExchanges     bool
 	EnableAllPairs         bool
 	EnablePortfolioWatcher bool
-	EnableWebsocketServer  bool
-	EnableRESTServer       bool
+	EnableGRPC             bool
+	EnableGRPCProxy        bool
+	EnableWebsocketRPC     bool
+	EnableDeprecatedRPC    bool
 	EnableTickerRoutine    bool
 	EnableOrderbookRoutine bool
 	EnableWebsocketRoutine bool

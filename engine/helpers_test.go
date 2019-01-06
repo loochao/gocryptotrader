@@ -243,7 +243,7 @@ func TestGetSpecificOrderbook(t *testing.T) {
 	asset := assets.AssetTypeSpot
 
 	orderbook.ProcessOrderbook("Bitstamp", p, orderbook.Base{Pair: p, Bids: bids}, asset)
-	ob, err := GetSpecificOrderbook("BTCUSD", "Bitstamp", asset)
+	ob, err := GetSpecificOrderbook(pair.NewCurrencyPair("BTC", "USD"), "Bitstamp", asset)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestGetSpecificOrderbook(t *testing.T) {
 		t.Fatal("Unexpected result")
 	}
 
-	ob, err = GetSpecificOrderbook("ETHLTC", "Bitstamp", asset)
+	ob, err = GetSpecificOrderbook(pair.NewCurrencyPair("ETH", "LTC"), "Bitstamp", asset)
 	if err == nil {
 		t.Fatal("Unexpected result")
 	}
@@ -268,7 +268,7 @@ func TestGetSpecificTicker(t *testing.T) {
 	asset := assets.AssetTypeSpot
 	ticker.ProcessTicker("Bitstamp", p, ticker.Price{Last: 1000}, asset)
 
-	tick, err := GetSpecificTicker("BTCUSD", "Bitstamp", asset)
+	tick, err := GetSpecificTicker(pair.NewCurrencyPair("BTC", "USD"), "Bitstamp", asset)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestGetSpecificTicker(t *testing.T) {
 		t.Fatal("Unexpected result")
 	}
 
-	tick, err = GetSpecificTicker("ETHLTC", "Bitstamp", asset)
+	tick, err = GetSpecificTicker(pair.NewCurrencyPair("ETH", "LTC"), "Bitstamp", asset)
 	if err == nil {
 		t.Fatal("Unexpected result")
 	}
@@ -357,7 +357,7 @@ func TestGetExchangeHighestPriceByCurrencyPair(t *testing.T) {
 		t.Error(err)
 	}
 
-	if exchange != "Bitstamp" {
+	if exchName != "Bitstamp" {
 		t.Error("Unexpected result")
 	}
 
@@ -379,7 +379,7 @@ func TestGetExchangeLowestPriceByCurrencyPair(t *testing.T) {
 		t.Error(err)
 	}
 
-	if exchange != "Bitfinex" {
+	if exchName != "Bitfinex" {
 		t.Error("Unexpected result")
 	}
 

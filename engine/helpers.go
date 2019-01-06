@@ -1,7 +1,18 @@
 package engine
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/thrasher-/gocryptotrader/common"
 	"github.com/thrasher-/gocryptotrader/currency"
@@ -14,6 +25,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/exchanges/ticker"
 	log "github.com/thrasher-/gocryptotrader/logger"
 	"github.com/thrasher-/gocryptotrader/portfolio"
+	"github.com/thrasher-/gocryptotrader/utils"
 )
 
 // GetAllAvailablePairs returns a list of all available pairs on either enabled
@@ -224,14 +236,14 @@ func GetRelatableCurrencies(p pair.CurrencyPair, incOrig, incUSDT bool) []pair.C
 
 // GetSpecificOrderbook returns a specific orderbook given the currency,
 // exchangeName and assetType
-func GetSpecificOrderbook(currency, exchangeName string, assetType assets.AssetType) (orderbook.Base, error) {
+func GetSpecificOrderbook(pair pair.CurrencyPair, exchangeName string, assetType assets.AssetType) (orderbook.Base, error) {
 	var specificOrderbook orderbook.Base
 	var err error
 	for x := range Bot.Exchanges {
 		if Bot.Exchanges[x] != nil {
 			if Bot.Exchanges[x].GetName() == exchangeName {
 				specificOrderbook, err = Bot.Exchanges[x].FetchOrderbook(
-					pair.NewCurrencyPairFromString(currency),
+					pair,
 					assetType,
 				)
 				break
@@ -243,14 +255,14 @@ func GetSpecificOrderbook(currency, exchangeName string, assetType assets.AssetT
 
 // GetSpecificTicker returns a specific ticker given the currency,
 // exchangeName and assetType
-func GetSpecificTicker(currency, exchangeName string, assetType assets.AssetType) (ticker.Price, error) {
+func GetSpecificTicker(pair pair.CurrencyPair, exchangeName string, assetType assets.AssetType) (ticker.Price, error) {
 	var specificTicker ticker.Price
 	var err error
 	for x := range Bot.Exchanges {
 		if Bot.Exchanges[x] != nil {
 			if Bot.Exchanges[x].GetName() == exchangeName {
 				specificTicker, err = Bot.Exchanges[x].FetchTicker(
-					pair.NewCurrencyPairFromString(currency),
+					pair,
 					assetType,
 				)
 				break
@@ -429,14 +441,14 @@ func GetExchangeCryptocurrencyDepositAddresses() map[string]map[string]string {
 
 		if !Bot.Exchanges[x].GetAuthenticatedAPISupport() {
 			if Bot.Settings.Verbose {
-				log.Printf("GetExchangeCryptocurrencyDepositAddresses: Skippping %s due to disabled authenticated API support.", exchName)
+				log.Debugf("GetExchangeCryptocurrencyDepositAddresses: Skippping %s due to disabled authenticated API support.", exchName)
 			}
 			continue
 		}
 
 		cryptoCurrencies, err := GetCryptocurrenciesByExchange(exchName, true, true, assets.AssetTypeSpot)
 		if err != nil {
-			log.Printf("%s failed to get cryptocurrency deposit addresses. Err: %s", exchName, err)
+			log.Debugf("%s failed to get cryptocurrency deposit addresses. Err: %s", exchName, err)
 			continue
 		}
 
@@ -445,7 +457,7 @@ func GetExchangeCryptocurrencyDepositAddresses() map[string]map[string]string {
 			cryptocurrency := cryptoCurrencies[y]
 			depositAddr, err := Bot.Exchanges[x].GetDepositAddress(pair.CurrencyItem(cryptocurrency))
 			if err != nil {
-				log.Printf("%s failed to get cryptocurrency deposit addresses. Err: %s", exchName, err)
+				log.Debugf("%s failed to get cryptocurrency deposit addresses. Err: %s", exchName, err)
 				continue
 			}
 			cryptoAddr[cryptocurrency] = depositAddr
@@ -529,4 +541,167 @@ func WithdrawCryptocurrencyFundsByExchange(exchName string, cryptocurrency pair.
 func FormatCurrency(p pair.CurrencyPair) pair.CurrencyItem {
 	return p.Display(Bot.Config.Currency.CurrencyPairFormat.Delimiter,
 		Bot.Config.Currency.CurrencyPairFormat.Uppercase)
+}
+
+// GetExchanges returns a list of loaded exchanges
+func GetExchanges(enabled bool) []string {
+	var exchanges []string
+	for x := range Bot.Exchanges {
+		if Bot.Exchanges[x].IsEnabled() && enabled {
+			exchanges = append(exchanges, Bot.Exchanges[x].GetName())
+			continue
+		}
+		exchanges = append(exchanges, Bot.Exchanges[x].GetName())
+	}
+	return exchanges
+}
+
+// GetAllActiveTickers returns all enabled exchange tickers
+func GetAllActiveTickers() []EnabledExchangeCurrencies {
+	var tickerData []EnabledExchangeCurrencies
+
+	for _, exch := range Bot.Exchanges {
+		if !exch.IsEnabled() {
+			continue
+		}
+
+		assets := exch.GetAssetTypes()
+		exchName := exch.GetName()
+		var exchangeTicker EnabledExchangeCurrencies
+		exchangeTicker.ExchangeName = exchName
+
+		for y := range assets {
+			currencies := exch.GetEnabledPairs(assets[y])
+			for z := range currencies {
+				tp, err := exch.FetchTicker(currencies[z], assets[y])
+				if err != nil {
+					log.Debugf("Exchange %s failed to retrieve %s ticker. Err: %s", exchName,
+						currencies[z].Pair().String(),
+						err)
+					continue
+				}
+				exchangeTicker.ExchangeValues = append(exchangeTicker.ExchangeValues, tp)
+			}
+			tickerData = append(tickerData, exchangeTicker)
+		}
+	}
+	return tickerData
+}
+
+// GetAllEnabledExchangeAccountInfo returns all the current enabled exchanges
+func GetAllEnabledExchangeAccountInfo() AllEnabledExchangeAccounts {
+	var response AllEnabledExchangeAccounts
+	for _, individualBot := range Bot.Exchanges {
+		if individualBot != nil && individualBot.IsEnabled() {
+			if !individualBot.GetAuthenticatedAPISupport() {
+				if Bot.Settings.Verbose {
+					log.Debugf("GetAllEnabledExchangeAccountInfo: Skippping %s due to disabled authenticated API support.", individualBot.GetName())
+				}
+				continue
+			}
+			individualExchange, err := individualBot.GetAccountInfo()
+			if err != nil {
+				log.Debugf("Error encountered retrieving exchange account info for %s. Error %s",
+					individualBot.GetName(), err)
+				continue
+			}
+			response.Data = append(response.Data, individualExchange)
+		}
+	}
+	return response
+}
+
+func checkCerts() error {
+	targetDir := utils.GetTLSDir(Bot.Settings.DataDir)
+	_, err := os.Stat(targetDir)
+	if os.IsNotExist(err) {
+		err := common.CheckDir(targetDir, true)
+		if err != nil {
+			return err
+		}
+		return genCert(targetDir)
+	}
+
+	log.Debugf("gRPC TLS certs directory already exists, will use them.")
+	return nil
+}
+
+func genCert(targetDir string) error {
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return fmt.Errorf("failed to generate ecdsa private key: %s", err)
+	}
+
+	notBefore := time.Now()
+	notAfter := notBefore.Add(time.Duration(time.Hour * 24 * 365))
+
+	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+	if err != nil {
+		return fmt.Errorf("failed to generate serial number: %s", err)
+	}
+
+	host, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("failed to get hostname: %s", err)
+	}
+
+	dnsNames := []string{host}
+	if host != "localhost" {
+		dnsNames = append(dnsNames, "localhost")
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"gocryptotrader"},
+			CommonName:   host,
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+
+		KeyUsage:    x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+
+		IPAddresses: []net.IP{
+			net.ParseIP("127.0.0.1"),
+			net.ParseIP("::1"),
+		},
+		DNSNames: dnsNames,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privKey.PublicKey, privKey)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate: %s", err)
+	}
+
+	certData := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	if certData == nil {
+		return fmt.Errorf("cert data is nil")
+	}
+
+	b, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ECDSA private key: %s", err)
+	}
+
+	keyData := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: b})
+	if keyData == nil {
+		return fmt.Errorf("key pem data is nil")
+	}
+
+	err = common.WriteFile(filepath.Join(targetDir, "key.pem"), keyData)
+	if err != nil {
+		return fmt.Errorf("failed to write key.pem file %s", err)
+	}
+
+	err = common.WriteFile(filepath.Join(targetDir, "cert.pem"), certData)
+	if err != nil {
+		return fmt.Errorf("failed to write cert.pem file %s", err)
+	}
+
+	log.Debugf("TLS key.pem and cert.pem files written to %s", targetDir)
+	return nil
 }

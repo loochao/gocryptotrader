@@ -18,14 +18,13 @@ type Config struct {
 	Logging           log.Logging          `json:"logging"`
 	Currency          CurrencyConfig       `json:"currencyConfig"`
 	Communications    CommunicationsConfig `json:"communications"`
+	RemoteControl     RemoteControlConfig  `json:"remoteControl"`
 	Portfolio         portfolio.Base       `json:"portfolioAddresses"`
-	RESTServer        RESTConfig           `json:"restServer"`
-	WebsocketServer   WebsocketConfig      `json:"websocketServer"`
 	Exchanges         []ExchangeConfig     `json:"exchanges"`
 	BankAccounts      []BankAccount        `json:"bankAccounts"`
 
 	// Deprecated config settings, will be removed at a future date
-	Webserver           *Webserver                `json:"webserver,omitempty"`
+	Webserver           *WebserverConfig          `json:"webserver,omitempty"`
 	CurrencyPairFormat  *CurrencyPairFormatConfig `json:"currencyPairFormat,omitempty"`
 	FiatDisplayCurrency string                    `json:"fiatDispayCurrency,omitempty"`
 	Cryptocurrencies    string                    `json:"cryptocurrencies,omitempty"`
@@ -42,13 +41,11 @@ type ExchangeConfig struct {
 	HTTPUserAgent   string               `json:"httpUserAgent,omitempty"`
 	HTTPRateLimiter *HTTPRateLimitConfig `json:"httpRateLimiter,omitempty"`
 	ProxyAddress    string               `json:"proxyAddress,omitempty"`
-
-	BaseCurrencies string               `json:"baseCurrencies"`
-	CurrencyPairs  *CurrencyPairsConfig `json:"currencyPairs"`
-	API            APIConfig            `json:"api"`
-
-	Features     *FeaturesConfig `json:"features"`
-	BankAccounts []BankAccount   `json:"bankAccounts,omitempty"`
+	BaseCurrencies  string               `json:"baseCurrencies"`
+	CurrencyPairs   *CurrencyPairsConfig `json:"currencyPairs"`
+	API             APIConfig            `json:"api"`
+	Features        *FeaturesConfig      `json:"features"`
+	BankAccounts    []BankAccount        `json:"bankAccounts,omitempty"`
 
 	// Deprecated settings which will be removed in a future update
 	AvailablePairs            *string                   `json:"availablePairs,omitempty"`
@@ -70,24 +67,49 @@ type ExchangeConfig struct {
 	WebsocketURL              *string                   `json:"websocketUrl,omitempty"`
 }
 
-// RESTConfig struct holds the prestart variables for the webserver.
-type RESTConfig struct {
+// GRPCConfig stores the gRPC settings
+type GRPCConfig struct {
+	Enabled                bool   `json:"enabled"`
+	ListenAddress          string `json:"listenAddress"`
+	GRPCProxyEnabled       bool   `json:"grpcProxyEnabled"`
+	GRPCProxyListenAddress string `json:"grpcProxyListenAddress"`
+}
+
+// DepcrecatedRPCConfig stores the deprecatedRPCConfig settings
+type DepcrecatedRPCConfig struct {
 	Enabled       bool   `json:"enabled"`
-	AdminUsername string `json:"adminUsername"`
-	AdminPassword string `json:"adminPassword"`
 	ListenAddress string `json:"listenAddress"`
 }
 
-// WebsocketConfig struct holds the variables for the Websocket server.
-type WebsocketConfig struct {
-	RESTConfig
-	WebsocketConnectionLimit     int  `json:"websocketConnectionLimit"`
-	WebsocketMaxAuthFailures     int  `json:"websocketMaxAuthFailures"`
-	WebsocketAllowInsecureOrigin bool `json:"websocketAllowInsecureOrigin"`
+// WebsocketRPCConfig stores the websocket config info
+type WebsocketRPCConfig struct {
+	Enabled             bool   `json:"enabled"`
+	ListenAddress       string `json:"listenAddress"`
+	ConnectionLimit     int    `json:"connectionLimit"`
+	MaxAuthFailures     int    `json:"maxAuthFailures"`
+	AllowInsecureOrigin bool   `json:"allowInsecureOrigin"`
 }
 
-// Webserver stores the old webserver config
-type Webserver WebsocketConfig
+// RemoteControlConfig stores the RPC services config
+type RemoteControlConfig struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+
+	GRPC          GRPCConfig           `json:"gRPC"`
+	DeprecatedRPC DepcrecatedRPCConfig `json:"deprecatedRPC"`
+	WebsocketRPC  WebsocketRPCConfig   `json:"websocketRPC"`
+}
+
+// WebserverConfig stores the old webserver config
+type WebserverConfig struct {
+	Enabled                      bool   `json:"enabled"`
+	AdminUsername                string `json:"adminUsername"`
+	AdminPassword                string `json:"adminPassword"`
+	ListenAddress                string `json:"listenAddress"`
+	WebsocketConnectionLimit     int    `json:"websocketConnectionLimit"`
+	WebsocketMaxAuthFailures     int    `json:"websocketMaxAuthFailures"`
+	WebsocketAllowInsecureOrigin bool   `json:"websocketAllowInsecureOrigin"`
+}
 
 // Post holds the bot configuration data
 type Post struct {

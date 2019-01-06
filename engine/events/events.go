@@ -61,7 +61,7 @@ type ConditionParams struct {
 
 // Event struct holds the event variables
 type Event struct {
-	ID        int
+	ID        int64
 	Exchange  string
 	Item      string
 	Condition ConditionParams
@@ -83,7 +83,7 @@ func SetComms(commsP *communications.Communications) {
 
 // Add adds an event to the Events chain and returns an index/eventID
 // and an error
-func Add(Exchange, Item string, Condition ConditionParams, CurrencyPair pair.CurrencyPair, Asset assets.AssetType, Action string) (int, error) {
+func Add(Exchange, Item string, Condition ConditionParams, CurrencyPair pair.CurrencyPair, Asset assets.AssetType, Action string) (int64, error) {
 	err := IsValidEvent(Exchange, Item, Condition, Action)
 	if err != nil {
 		return 0, err
@@ -94,7 +94,7 @@ func Add(Exchange, Item string, Condition ConditionParams, CurrencyPair pair.Cur
 	if len(Events) == 0 {
 		Event.ID = 0
 	} else {
-		Event.ID = len(Events) + 1
+		Event.ID = int64(len(Events) + 1)
 	}
 
 	Event.Exchange = Exchange
@@ -109,7 +109,7 @@ func Add(Exchange, Item string, Condition ConditionParams, CurrencyPair pair.Cur
 }
 
 // Remove deletes and event by its ID
-func Remove(EventID int) bool {
+func Remove(EventID int64) bool {
 	for i, x := range Events {
 		if x.ID == EventID {
 			Events = append(Events[:i], Events[i+1:]...)
@@ -163,7 +163,7 @@ func (e *Event) processTicker() bool {
 	t, err := ticker.GetTicker(e.Exchange, e.Pair, e.Asset)
 	if err != nil {
 		if Verbose {
-			log.Printf("Events: failed to get ticker. Err: %s", err)
+			log.Debugf("Events: failed to get ticker. Err: %s", err)
 		}
 		return false
 	}
@@ -172,7 +172,7 @@ func (e *Event) processTicker() bool {
 
 	if lastPrice == 0 {
 		if Verbose {
-			log.Printf("Events: ticker last price is 0")
+			log.Debugln("Events: ticker last price is 0")
 		}
 		return false
 	}
@@ -220,7 +220,7 @@ func (e *Event) processOrderbook() bool {
 	ob, err := orderbook.GetOrderbook(e.Exchange, e.Pair, e.Asset)
 	if err != nil {
 		if Verbose {
-			log.Printf("Events: Failed to get orderbook. Err: %s", err)
+			log.Debugf("Events: Failed to get orderbook. Err: %s", err)
 		}
 		return false
 	}
@@ -232,7 +232,7 @@ func (e *Event) processOrderbook() bool {
 			result := e.processCondition(subtotal, e.Condition.OrderbookAmount)
 			if result {
 				success = true
-				log.Printf("Events: Bid Amount: %f Price: %v Subtotal: %v", ob.Bids[x].Amount, ob.Bids[x].Price, subtotal)
+				log.Debugf("Events: Bid Amount: %f Price: %v Subtotal: %v", ob.Bids[x].Amount, ob.Bids[x].Price, subtotal)
 			}
 		}
 	}
@@ -243,7 +243,7 @@ func (e *Event) processOrderbook() bool {
 			result := e.processCondition(subtotal, e.Condition.OrderbookAmount)
 			if result {
 				success = true
-				log.Printf("Events: Ask Amount: %f Price: %v Subtotal: %v", ob.Asks[x].Amount, ob.Asks[x].Price, subtotal)
+				log.Debugf("Events: Ask Amount: %f Price: %v Subtotal: %v", ob.Asks[x].Amount, ob.Asks[x].Price, subtotal)
 			}
 		}
 	}
@@ -311,7 +311,7 @@ func IsValidEvent(Exchange, Item string, Condition ConditionParams, Action strin
 // EventManger is the overarching routine that will iterate through the Events
 // chain
 func EventManger() {
-	log.Printf("EventManager started. SleepDelay: %v", SleepDelay.String())
+	log.Debugf("EventManager started. SleepDelay: %v", SleepDelay.String())
 
 	for {
 		total, executed := GetEventCounter()
@@ -319,11 +319,11 @@ func EventManger() {
 			for _, event := range Events {
 				if !event.Executed {
 					if Verbose {
-						log.Printf("Events: Processing event %s.", event.String())
+						log.Debugf("Events: Processing event %s.", event.String())
 					}
 					success := event.CheckCondition()
 					if success {
-						log.Printf(
+						log.Debugf(
 							"Events: ID: %d triggered on %s successfully.\n", event.ID,
 							event.Exchange,
 						)

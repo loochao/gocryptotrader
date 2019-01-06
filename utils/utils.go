@@ -11,7 +11,8 @@ import (
 )
 
 const (
-	logFile = "debug.log"
+	logFile       = "debug.log"
+	defaultTLSDir = "tls"
 )
 
 // Util vars
@@ -54,4 +55,9 @@ func InitLogFile(lFile string) error {
 // GetLogFile returns the debug.log file
 func GetLogFile(dir string) string {
 	return dir + common.GetOSPathSlash() + logFile
+}
+
+// GetTLSDir returns the default TLS dir
+func GetTLSDir(dir string) string {
+	return dir + common.GetOSPathSlash() + defaultTLSDir
 }

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +17,7 @@ import (
 	"github.com/thrasher-/gocryptotrader/engine/events"
 	exchange "github.com/thrasher-/gocryptotrader/exchanges"
 	"github.com/thrasher-/gocryptotrader/exchanges/request"
+	log "github.com/thrasher-/gocryptotrader/logger"
 	"github.com/thrasher-/gocryptotrader/portfolio"
 	"github.com/thrasher-/gocryptotrader/utils"
 )
@@ -68,7 +68,7 @@ func NewFromSettings(settings *Settings) (*Engine, error) {
 
 	var b Engine
 	b.Config = &config.Cfg
-	log.Printf("Loading config file %s..\n", settings.ConfigFile)
+	log.Debugf("Loading config file %s..\n", settings.ConfigFile)
 	err := b.Config.LoadConfig(settings.ConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config. Err: %s", err)
@@ -79,6 +79,16 @@ func NewFromSettings(settings *Settings) (*Engine, error) {
 		return nil, fmt.Errorf("failed to open/create data directory: %s. Err: %s", settings.DataDir, err)
 	}
 
+	err = b.Config.CheckLoggerConfig()
+	if err != nil {
+		log.Errorf("Failed to configure logger. Err: %s", err)
+	}
+
+	err = log.SetupLogger()
+	if err != nil {
+		log.Errorf("Failed to setup logger. Err: %s", err)
+	}
+
 	b.Settings.ConfigFile = settings.ConfigFile
 	b.Settings.DataDir = settings.DataDir
 	b.Settings.LogFile = utils.GetLogFile(settings.DataDir)
@@ -87,13 +97,6 @@ func NewFromSettings(settings *Settings) (*Engine, error) {
 	err = utils.AdjustGoMaxProcs(settings.GoMaxProcs)
 	if err != nil {
 		return nil, fmt.Errorf("unable to adjust runtime GOMAXPROCS value. Err: %s", err)
-	}
-
-	err = utils.InitLogFile(b.Settings.LogFile)
-	if err != nil {
-		log.Printf("failed to create log file writer. Err: %s", err)
-	} else {
-		log.Printf("Using log file: %s.\n", b.Settings.LogFile)
 	}
 
 	b.handleInterrupt()
@@ -112,16 +115,28 @@ func ValidateSettings(b *Engine, s *Settings) {
 	b.Settings.EnablePortfolioWatcher = s.EnablePortfolioWatcher
 
 	// TO-DO: FIXME
-	if flag.Lookup("websocketserver") != nil {
-		b.Settings.EnableWebsocketServer = s.EnableWebsocketServer
+	if flag.Lookup("grpc") != nil {
+		b.Settings.EnableGRPC = s.EnableGRPC
 	} else {
-		b.Settings.EnableWebsocketServer = b.Config.WebsocketServer.Enabled
+		b.Settings.EnableGRPC = b.Config.RemoteControl.GRPC.Enabled
 	}
 
-	if flag.Lookup("restserver") != nil {
-		b.Settings.EnableRESTServer = s.EnableRESTServer
+	if flag.Lookup("grpcproxy") != nil {
+		b.Settings.EnableGRPCProxy = s.EnableGRPCProxy
 	} else {
-		b.Settings.EnableRESTServer = b.Config.RESTServer.Enabled
+		b.Settings.EnableGRPCProxy = b.Config.RemoteControl.GRPC.GRPCProxyEnabled
+	}
+
+	if flag.Lookup("websocketrpc") != nil {
+		b.Settings.EnableWebsocketRPC = s.EnableWebsocketRPC
+	} else {
+		b.Settings.EnableWebsocketRPC = b.Config.RemoteControl.WebsocketRPC.Enabled
+	}
+
+	if flag.Lookup("deprecatedrpc") != nil {
+		b.Settings.EnableDeprecatedRPC = s.EnableDeprecatedRPC
+	} else {
+		b.Settings.EnableDeprecatedRPC = b.Config.RemoteControl.DeprecatedRPC.Enabled
 	}
 
 	b.Settings.EnableCommsRelayer = s.EnableCommsRelayer
@@ -189,38 +204,40 @@ func ValidateSettings(b *Engine, s *Settings) {
 
 // PrintSettings returns the engine settings
 func PrintSettings(s Settings) {
-	log.Println()
-	log.Println("ENGINE SETTINGS")
-	log.Printf("- CORE SETTINGS:")
-	log.Printf("\t Verbose mode: %v", s.Verbose)
-	log.Printf("\t Enable dry run mode: %v", s.EnableDryRun)
-	log.Printf("\t Enable all exchanges: %v", s.EnableAllExchanges)
-	log.Printf("\t Enable all pairs: %v", s.EnableAllPairs)
-	log.Printf("\t Enable portfolio watcher: %v", s.EnablePortfolioWatcher)
-	log.Printf("\t Enable websocket server: %v", s.EnableWebsocketServer)
-	log.Printf("\t Enable REST server: %v", s.EnableRESTServer)
-	log.Printf("\t Enable comms relayer: %v", s.EnableCommsRelayer)
-	log.Printf("\t Enable event manager: %v", s.EnableEventManager)
-	log.Printf("\t Event manager sleep delay: %v", s.EventManagerDelay)
-	log.Printf("\t Enable ticker routine: %v", s.EnableTickerRoutine)
-	log.Printf("\t Enable orderbook routine: %v", s.EnableOrderbookRoutine)
-	log.Printf("\t Enable websocket routine: %v\n", s.EnableWebsocketRoutine)
-	log.Printf("- EXCHANGE SETTINGS:")
-	log.Printf("\t Enable exchange auto pair updates: %v", s.EnableExchangeAutoPairUpdates)
-	log.Printf("\t Disable all exchange auto pair updates: %v", s.DisableExchangeAutoPairUpdates)
-	log.Printf("\t Enable exchange websocket support: %v", s.EnableExchangeWebsocketSupport)
-	log.Printf("\t Enable exchange verbose mode: %v", s.EnableExchangeVerbose)
-	log.Printf("\t Enable exchange HTTP rate limiter: %v", s.EnableHTTPRateLimiter)
-	log.Printf("\t Exchange max HTTP request jobs: %v", s.MaxHTTPRequestJobsLimit)
-	log.Printf("\t Exchange HTTP request timeout retry amount: %v", s.RequestTimeoutRetryAttempts)
-	log.Printf("\t Exchange HTTP timeout: %v", s.ExchangeHTTPTimeout)
-	log.Printf("\t Exchange HTTP user agent: %v", s.ExchangeHTTPUserAgent)
-	log.Printf("\t Exchange HTTP proxy: %v\n", s.ExchangeHTTPProxy)
-	log.Printf("- COMMON SETTINGS:")
-	log.Printf("\t Global HTTP timeout: %v", s.GlobalHTTPTimeout)
-	log.Printf("\t Global HTTP user agent: %v", s.GlobalHTTPUserAgent)
-	log.Printf("\t Global HTTP proxy: %v", s.ExchangeHTTPProxy)
-	log.Println()
+	log.Debugln()
+	log.Debugf("ENGINE SETTINGS")
+	log.Debugf("- CORE SETTINGS:")
+	log.Debugf("\t Verbose mode: %v", s.Verbose)
+	log.Debugf("\t Enable dry run mode: %v", s.EnableDryRun)
+	log.Debugf("\t Enable all exchanges: %v", s.EnableAllExchanges)
+	log.Debugf("\t Enable all pairs: %v", s.EnableAllPairs)
+	log.Debugf("\t Enable portfolio watcher: %v", s.EnablePortfolioWatcher)
+	log.Debugf("\t Enable gPRC: %v", s.EnableGRPC)
+	log.Debugf("\t Enable gRPC Proxy: %v", s.EnableGRPCProxy)
+	log.Debugf("\t Enable websocket RPC: %v", s.EnableWebsocketRPC)
+	log.Debugf("\t Enable deprecated RPC: %v", s.EnableDeprecatedRPC)
+	log.Debugf("\t Enable comms relayer: %v", s.EnableCommsRelayer)
+	log.Debugf("\t Enable event manager: %v", s.EnableEventManager)
+	log.Debugf("\t Event manager sleep delay: %v", s.EventManagerDelay)
+	log.Debugf("\t Enable ticker routine: %v", s.EnableTickerRoutine)
+	log.Debugf("\t Enable orderbook routine: %v", s.EnableOrderbookRoutine)
+	log.Debugf("\t Enable websocket routine: %v\n", s.EnableWebsocketRoutine)
+	log.Debugf("- EXCHANGE SETTINGS:")
+	log.Debugf("\t Enable exchange auto pair updates: %v", s.EnableExchangeAutoPairUpdates)
+	log.Debugf("\t Disable all exchange auto pair updates: %v", s.DisableExchangeAutoPairUpdates)
+	log.Debugf("\t Enable exchange websocket support: %v", s.EnableExchangeWebsocketSupport)
+	log.Debugf("\t Enable exchange verbose mode: %v", s.EnableExchangeVerbose)
+	log.Debugf("\t Enable exchange HTTP rate limiter: %v", s.EnableHTTPRateLimiter)
+	log.Debugf("\t Exchange max HTTP request jobs: %v", s.MaxHTTPRequestJobsLimit)
+	log.Debugf("\t Exchange HTTP request timeout retry amount: %v", s.RequestTimeoutRetryAttempts)
+	log.Debugf("\t Exchange HTTP timeout: %v", s.ExchangeHTTPTimeout)
+	log.Debugf("\t Exchange HTTP user agent: %v", s.ExchangeHTTPUserAgent)
+	log.Debugf("\t Exchange HTTP proxy: %v\n", s.ExchangeHTTPProxy)
+	log.Debugf("- COMMON SETTINGS:")
+	log.Debugf("\t Global HTTP timeout: %v", s.GlobalHTTPTimeout)
+	log.Debugf("\t Global HTTP user agent: %v", s.GlobalHTTPUserAgent)
+	log.Debugf("\t Global HTTP proxy: %v", s.ExchangeHTTPProxy)
+	log.Debugln()
 }
 
 // Start starts the engine
@@ -229,45 +246,45 @@ func (e *Engine) Start() {
 		log.Fatal("Engine instance is nil")
 	}
 
-	log.Printf("Bot '%s' started.\n", e.Config.Name)
+	log.Debugf("Bot '%s' started.\n", e.Config.Name)
 
 	enabledExchanges := e.Config.CountEnabledExchanges()
 	if e.Settings.EnableAllExchanges {
 		enabledExchanges = len(e.Config.Exchanges)
 	}
 
-	log.Println()
-	log.Println("EXCHANGE COVERAGE")
-	log.Printf("\t Available Exchanges: %d. Enabled Exchanges: %d.\n",
+	log.Debugln()
+	log.Debugln("EXCHANGE COVERAGE")
+	log.Debugf("\t Available Exchanges: %d. Enabled Exchanges: %d.\n",
 		len(e.Config.Exchanges), enabledExchanges)
 
 	if e.Settings.ExchangePurgeCredentials {
-		log.Println("Purging exchange API credentials.")
+		log.Debugln("Purging exchange API credentials.")
 		e.Config.PurgeExchangeAPICredentials()
 	}
 
-	log.Println("Setting up exchanges..")
+	log.Debugln("Setting up exchanges..")
 	SetupExchanges()
 	if len(e.Exchanges) == 0 {
 		log.Fatalf("No exchanges were able to be loaded. Exiting")
 	}
 
 	if e.Settings.EnableCommsRelayer {
-		log.Println("Starting communication mediums..")
+		log.Debugln("Starting communication mediums..")
 		e.CommsRelayer = communications.NewComm(e.Config.GetCommunicationsConfig())
 		e.CommsRelayer.GetEnabledCommunicationMediums()
 	}
 
-	log.Printf("Fiat display currency: %s.", e.Config.Currency.FiatDisplayCurrency)
+	log.Debugf("Fiat display currency: %s.", e.Config.Currency.FiatDisplayCurrency)
 	currency.BaseCurrency = e.Config.Currency.FiatDisplayCurrency
 	currency.FXProviders = forexprovider.StartFXService(e.Config.GetCurrencyConfig().ForexProviders)
-	log.Printf("Primary forex conversion provider: %s.\n", e.Config.GetPrimaryForexProvider())
+	log.Debugf("Primary forex conversion provider: %s.\n", e.Config.GetPrimaryForexProvider())
 	err := e.Config.RetrieveConfigCurrencyPairs(true)
 	if err != nil {
-		log.Fatalf("Failed to retrieve config currency pairs. Error: %s", err)
+		log.Debugf("Failed to retrieve config currency pairs. Error: %s", err)
 	}
-	log.Println("Successfully retrieved config currencies.")
-	log.Println("Fetching currency data from forex provider..")
+	log.Debugln("Successfully retrieved config currencies.")
+	log.Debugln("Fetching currency data from forex provider..")
 	err = currency.Seed(common.JoinStrings(currency.FiatCurrencies, ","))
 	if err != nil {
 		log.Fatalf("Unable to fetch forex data. Error: %s", err)
@@ -279,11 +296,15 @@ func (e *Engine) Start() {
 
 	e.CryptocurrencyDepositAddresses = GetExchangeCryptocurrencyDepositAddresses()
 
-	if e.Settings.EnableRESTServer {
+	if e.Settings.EnableGRPC {
+		go StartRPCServer()
+	}
+
+	if e.Settings.EnableDeprecatedRPC {
 		go StartRESTServer()
 	}
 
-	if e.Settings.EnableWebsocketServer {
+	if e.Settings.EnableWebsocketRPC {
 		go StartWebsocketServer()
 		StartWebsocketHandler()
 	}
@@ -314,7 +335,7 @@ func (e *Engine) Start() {
 
 // Stop correctly shuts down engine saving configuration files
 func (e *Engine) Stop() {
-	log.Println("Engine shutting down..")
+	log.Debugln("Engine shutting down..")
 
 	if len(portfolio.Portfolio.Addresses) != 0 {
 		e.Config.Portfolio = portfolio.Portfolio
@@ -324,13 +345,13 @@ func (e *Engine) Stop() {
 		err := e.Config.SaveConfig(e.Settings.ConfigFile)
 
 		if err != nil {
-			log.Println("Unable to save config.")
+			log.Error("Unable to save config.")
 		} else {
-			log.Println("Config file saved successfully.")
+			log.Debugln("Config file saved successfully.")
 		}
 	}
 
-	log.Println("Exiting.")
+	log.Debugln("Exiting.")
 
 	if utils.LogFileHandle != nil {
 		utils.LogFileHandle.Close()
@@ -346,7 +367,7 @@ func (e *Engine) handleInterrupt() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-c
-		log.Printf("Captured %v, shutdown requested.", sig)
+		log.Debugf("Captured %v, shutdown requested.", sig)
 		e.Shutdown <- true
 	}()
 }

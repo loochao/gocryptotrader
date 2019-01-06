@@ -116,7 +116,7 @@ func (b *BTCMarkets) Start(wg *sync.WaitGroup) {
 // Run implements the BTC Markets wrapper
 func (b *BTCMarkets) Run() {
 	if b.Verbose {
-		log.Printf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.CurrencyPairs.Spot.Enabled), b.CurrencyPairs.Spot.Enabled)
+		log.Debugf("%s %d currencies enabled: %s.\n", b.GetName(), len(b.CurrencyPairs.Spot.Enabled), b.CurrencyPairs.Spot.Enabled)
 	}
 
 	forceUpdate := false
@@ -127,7 +127,7 @@ func (b *BTCMarkets) Run() {
 
 		err := b.UpdatePairs(enabledPairs, assets.AssetTypeSpot, true, true)
 		if err != nil {
-			log.Printf("%s failed to update currencies. Err: %s", b.Name, err)
+			log.Errorf("%s failed to update currencies. Err: %s", b.Name, err)
 		}
 	}
 
@@ -137,7 +137,7 @@ func (b *BTCMarkets) Run() {
 
 	err := b.UpdateTradablePairs(forceUpdate)
 	if err != nil {
-		log.Printf("%s failed to update tradable pairs. Err: %s", b.Name, err)
+		log.Errorf("%s failed to update tradable pairs. Err: %s", b.Name, err)
 	}
 }
 

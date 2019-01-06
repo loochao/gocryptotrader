@@ -73,7 +73,7 @@ func TestValidHostRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Host = common.ExtractHost(Bot.Config.RESTServer.ListenAddress)
+	req.Host = common.ExtractHost(Bot.Config.RemoteControl.DeprecatedRPC.ListenAddress)
 
 	resp := httptest.NewRecorder()
 	NewRouter(true).ServeHTTP(resp, req)
